@@ -21,6 +21,8 @@ export type UploadedImage = {
   src: string;
   width: number;
   height: number;
+  mimeType: string;
+  blob?: Blob;
 };
 
 export type BaseObject = {
@@ -73,11 +75,25 @@ export type ShapeObject = BaseObject & {
 export type EditorObject = ImageObject | TextObject | PlaceholderObject | ShapeObject;
 
 export type CarouselProject = {
+  id: string;
   name: string;
+  createdAt: number;
+  updatedAt: number;
   pageCount: number;
   background: string;
   objects: EditorObject[];
   uploads: UploadedImage[];
+  thumbnail?: string;
 };
 
 export type ExportQuality = 0.8 | 0.9 | 0.95 | 1;
+export type ExportFormat = 'jpg' | 'png';
+
+export type ProjectSummary = {
+  id: string;
+  name: string;
+  createdAt: number;
+  updatedAt: number;
+  pageCount: number;
+  thumbnail?: string;
+};

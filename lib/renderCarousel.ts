@@ -1,6 +1,7 @@
 import {
   CarouselProject,
   EditorObject,
+  ExportFormat,
   PAGE_HEIGHT,
   PAGE_WIDTH,
   UploadedImage,
@@ -135,6 +136,7 @@ export async function renderCarouselPages(
   project: CarouselProject,
   quality = 0.95,
   selectedPage?: number,
+  format: ExportFormat = 'jpg',
 ) {
   const pages = selectedPage === undefined ? project.pageCount : 1;
   const start = selectedPage ?? 0;
@@ -156,10 +158,42 @@ export async function renderCarouselPages(
       await drawObject(ctx, object, project.uploads);
     }
 
-    urls.push(canvas.toDataURL('image/jpeg', quality));
+    urls.push(canvas.toDataURL(format === 'png' ? 'image/png' : 'image/jpeg', format === 'png' ? undefined : quality));
   }
 
   return urls;
+}
+
+export async function renderCarouselPageBlobs(
+  project: CarouselProject,
+  quality = 0.95,
+  selectedPage?: number,
+  format: ExportFormat = 'jpg',
+) {
+  const pages = await renderCarouselPages(project, quality, selectedPage, format);
+  return Promise.all(
+    pages.map(async (dataUrl) => {
+      const response = await fetch(dataUrl);
+      return response.blob();
+    }),
+  );
+}
+
+export async function renderProjectThumbnail(project: CarouselProject) {
+  const [dataUrl] = await renderCarouselPages(project, 0.8, 0, 'jpg');
+  const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+    const next = new Image();
+    next.onload = () => resolve(next);
+    next.onerror = () => reject(new Error('Thumbnail rendering failed.'));
+    next.src = dataUrl;
+  });
+  const canvas = document.createElement('canvas');
+  canvas.width = 180;
+  canvas.height = Math.round((180 * PAGE_HEIGHT) / PAGE_WIDTH);
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return dataUrl;
+  ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+  return canvas.toDataURL('image/jpeg', 0.75);
 }
 
 export function downloadDataUrl(dataUrl: string, filename: string) {

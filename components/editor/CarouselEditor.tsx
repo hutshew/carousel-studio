@@ -1,12 +1,26 @@
 'use client';
 
 import { ChangeEvent, useEffect, useMemo, useRef, useState } from 'react';
+import JSZip from 'jszip';
 import EditorStage from './EditorStage';
-import { clearProject, loadProject, saveProject } from '../../lib/projectStorage';
-import { downloadDataUrl, renderCarouselPages } from '../../lib/renderCarousel';
+import {
+  clearLastProjectId,
+  deleteProject,
+  duplicateProject,
+  getLastProjectId,
+  listProjects,
+  loadProject,
+  saveProject,
+} from '../../lib/projectStorage';
+import {
+  renderCarouselPageBlobs,
+  renderCarouselPages,
+  renderProjectThumbnail,
+} from '../../lib/renderCarousel';
 import {
   CarouselProject,
   EditorObject,
+  ExportFormat,
   ExportQuality,
   ImageObject,
   MAX_PAGES,
@@ -18,6 +32,7 @@ import {
   TextObject,
   ToolName,
   UploadedImage,
+  ProjectSummary,
 } from '../../types/editor';
 
 const tools: { icon: string; label: ToolName }[] = [
@@ -47,12 +62,17 @@ const presets = ['#ffffff', '#f4f1ea', '#111827', '#f97316', '#0f766e', '#2563eb
 const MIN_ZOOM = 20;
 const MAX_ZOOM = 100;
 
-const emptyProject: CarouselProject = {
-  name: 'My Carousel',
-  pageCount: 3,
-  background: '#ffffff',
-  uploads: [],
-  objects: [
+function createBlankProject(name = 'My Carousel', pageCount = 3): CarouselProject {
+  const now = Date.now();
+  return {
+    id: id('project'),
+    name,
+    createdAt: now,
+    updatedAt: now,
+    pageCount,
+    background: '#ffffff',
+    uploads: [],
+    objects: [
     {
       id: 'headline',
       type: 'text',
@@ -89,8 +109,9 @@ const emptyProject: CarouselProject = {
       italic: false,
       align: 'left',
     },
-  ],
-};
+    ],
+  };
+}
 
 function id(prefix: string) {
   return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -115,7 +136,45 @@ function getImageSize(src: string) {
 }
 
 function cloneProject(project: CarouselProject): CarouselProject {
+  if (typeof structuredClone === 'function') {
+    return structuredClone(project);
+  }
   return JSON.parse(JSON.stringify(project)) as CarouselProject;
+}
+
+function sanitizeFilename(name: string) {
+  return (
+    name
+      .trim()
+      .replace(/[\\/:*?"<>|]/g, '-')
+      .replace(/\s+/g, '-')
+      .replace(/-+/g, '-')
+      .replace(/^-|-$/g, '')
+      .toLowerCase() || 'carousel'
+  );
+}
+
+function downloadBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+function timeAgo(timestamp: number) {
+  const seconds = Math.max(1, Math.round((Date.now() - timestamp) / 1000));
+  if (seconds < 60) return 'Just now';
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${minutes} min ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours} hr ago`;
+  const days = Math.round(hours / 24);
+  if (days === 1) return 'Yesterday';
+  return `${days} days ago`;
 }
 
 function clamp(value: number, min: number, max: number) {
@@ -160,7 +219,15 @@ export default function CarouselEditor() {
   const inputRef = useRef<HTMLInputElement>(null);
   const replaceInputRef = useRef<HTMLInputElement>(null);
   const scrollerRef = useRef<HTMLDivElement>(null);
-  const [project, setProject] = useState<CarouselProject>(emptyProject);
+  const restoredObjectUrls = useRef<string[]>([]);
+  const [project, setProject] = useState<CarouselProject>(() => createBlankProject());
+  const [projects, setProjects] = useState<ProjectSummary[]>([]);
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'failed'>('idle');
+  const [storageReady, setStorageReady] = useState(false);
+  const [newProjectOpen, setNewProjectOpen] = useState(false);
+  const [newProjectName, setNewProjectName] = useState('My Carousel');
+  const [newProjectPages, setNewProjectPages] = useState(3);
+  const [deleteProjectId, setDeleteProjectId] = useState<string | null>(null);
   const [activeTool, setActiveTool] = useState<ToolName>('Upload');
   const [panelCollapsed, setPanelCollapsed] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -177,8 +244,13 @@ export default function CarouselEditor() {
   const [contextMenu, setContextMenu] = useState<{ id: string; x: number; y: number } | null>(null);
   const [previewUrls, setPreviewUrls] = useState<string[] | null>(null);
   const [exportOpen, setExportOpen] = useState(false);
+  const [exportFormat, setExportFormat] = useState<ExportFormat>('jpg');
   const [quality, setQuality] = useState<ExportQuality>(0.95);
   const [exportTarget, setExportTarget] = useState<'all' | 'selected'>('all');
+  const [zipExport, setZipExport] = useState(true);
+  const [individualExport, setIndividualExport] = useState(false);
+  const [exportProgress, setExportProgress] = useState('');
+  const [exporting, setExporting] = useState(false);
 
   const selectedObject = useMemo(
     () => project.objects.find((object) => object.id === selectedId) ?? null,
@@ -191,6 +263,78 @@ export default function CarouselEditor() {
       objects: project.objects.map((object) => (object.id === cropDraft.id ? cropDraft : object)),
     };
   }, [cropDraft, project]);
+
+  async function refreshProjects() {
+    try {
+      setProjects(await listProjects());
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Could not read projects.');
+    }
+  }
+
+  useEffect(() => {
+    let active = true;
+
+    async function restoreLastProject() {
+      try {
+        const lastId = getLastProjectId();
+        const summaries = await listProjects();
+        const initialId = lastId ?? summaries[0]?.id;
+        const restored = initialId ? await loadProject(initialId) : null;
+        if (!active) return;
+
+        if (restored) {
+          restoredObjectUrls.current.forEach((url) => URL.revokeObjectURL(url));
+          restoredObjectUrls.current = restored.uploads.map((upload) => upload.src);
+          setProject(restored);
+          setMessage('Project restored');
+        } else {
+          const blank = createBlankProject();
+          setProject(await saveProject(blank));
+          setMessage('New project ready');
+        }
+
+        setProjects(await listProjects());
+        setStorageReady(true);
+        setSaveStatus('saved');
+      } catch (error) {
+        setStorageReady(true);
+        setSaveStatus('failed');
+        setMessage(error instanceof Error ? error.message : 'Project restore failed.');
+      }
+    }
+
+    restoreLastProject();
+
+    return () => {
+      active = false;
+      restoredObjectUrls.current.forEach((url) => URL.revokeObjectURL(url));
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!storageReady) return;
+
+    setSaveStatus('saving');
+    const timer = window.setTimeout(async () => {
+      try {
+        const thumbnail = await renderProjectThumbnail(project);
+        const saved = await saveProject(project, thumbnail);
+        setProject((current) =>
+          current.id === saved.id ? { ...current, updatedAt: saved.updatedAt, thumbnail: saved.thumbnail } : current,
+        );
+        await refreshProjects();
+        setSaveStatus('saved');
+      } catch (error) {
+        setSaveStatus('failed');
+        setMessage(error instanceof Error ? error.message : 'Save failed.');
+      }
+    }, 1000);
+
+    return () => window.clearTimeout(timer);
+    // Project mutations are the intended autosave trigger.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [project.name, project.pageCount, project.background, project.objects, project.uploads, storageReady]);
 
   function calculateFitZoom() {
     const scroller = scrollerRef.current;
@@ -383,7 +527,7 @@ export default function CarouselEditor() {
       }
       const src = await fileToDataUrl(file);
       const size = await getImageSize(src);
-      const upload = { id: id('upload'), name: file.name, src, ...size };
+      const upload = { id: id('asset'), name: file.name, src, blob: file, mimeType: file.type, ...size };
       commit({
         ...project,
         uploads: [...project.uploads, upload],
@@ -535,7 +679,7 @@ export default function CarouselEditor() {
           }
           const src = await fileToDataUrl(file);
           const size = await getImageSize(src);
-          return { id: id('upload'), name: file.name, src, ...size };
+          return { id: id('asset'), name: file.name, src, blob: file, mimeType: file.type, ...size };
         }),
       );
 
@@ -807,50 +951,155 @@ export default function CarouselEditor() {
     }
   }
 
-  async function exportJpg() {
+  async function exportCarousel() {
+    if (exporting) return;
+
     try {
-      setMessage('Exporting JPG...');
+      setExporting(true);
+      setExportProgress('Preparing pages...');
       const selectedPage = exportTarget === 'selected' ? currentPage : undefined;
-      const pages = await renderCarouselPages(project, quality, selectedPage);
-      pages.forEach((url, index) => {
-        const pageNumber = selectedPage === undefined ? index + 1 : selectedPage + 1;
-        downloadDataUrl(url, `carousel-${String(pageNumber).padStart(2, '0')}.jpg`);
+      const pages = await renderCarouselPageBlobs(project, quality, selectedPage, exportFormat);
+      const basename = sanitizeFilename(project.name);
+      const extension = exportFormat === 'png' ? 'png' : 'jpg';
+
+      pages.forEach((_blob, index) => {
+        setExportProgress(`Exporting ${index + 1} / ${pages.length}`);
       });
-      setExportOpen(false);
-      setMessage(`Exported ${pages.length} JPG page${pages.length === 1 ? '' : 's'}`);
+
+      if (zipExport && pages.length > 1) {
+        setExportProgress('Creating ZIP...');
+        const zip = new JSZip();
+        pages.forEach((blob, index) => {
+          const pageNumber = selectedPage === undefined ? index + 1 : selectedPage + 1;
+          zip.file(`${basename}-${String(pageNumber).padStart(2, '0')}.${extension}`, blob);
+        });
+        downloadBlob(await zip.generateAsync({ type: 'blob' }), `${basename}.zip`);
+      }
+
+      if (!zipExport || individualExport || pages.length === 1) {
+        pages.forEach((blob, index) => {
+          const pageNumber = selectedPage === undefined ? index + 1 : selectedPage + 1;
+          downloadBlob(blob, `${basename}-${String(pageNumber).padStart(2, '0')}.${extension}`);
+        });
+      }
+
+      setExportProgress('Download ready ✓');
+      setMessage(`Exported ${pages.length} ${extension.toUpperCase()} page${pages.length === 1 ? '' : 's'}`);
     } catch (error) {
+      setExportProgress('Export failed');
       setMessage(error instanceof Error ? error.message : 'Export failed.');
+    } finally {
+      setExporting(false);
     }
   }
 
-  function saveLocalProject() {
+  async function saveLocalProject() {
     try {
-      saveProject(project);
-      setMessage('Project saved in this browser');
-    } catch {
-      setMessage('Project save failed. Large images may exceed browser storage.');
+      setSaveStatus('saving');
+      const thumbnail = await renderProjectThumbnail(project);
+      const saved = await saveProject(project, thumbnail);
+      setProject((current) => ({ ...current, updatedAt: saved.updatedAt, thumbnail: saved.thumbnail }));
+      await refreshProjects();
+      setSaveStatus('saved');
+      setMessage('Project saved');
+    } catch (error) {
+      setSaveStatus('failed');
+      setMessage(error instanceof Error ? error.message : 'Project save failed.');
     }
   }
 
-  function loadLocalProject() {
+  async function openProject(projectId: string) {
     try {
-      const saved = loadProject();
+      const saved = await loadProject(projectId);
       if (!saved) {
-        setMessage('No saved project found');
+        setMessage('Project not found');
         return;
       }
-      commit(saved, null);
-      setMessage('Project loaded');
-    } catch {
-      setMessage('Project load failed.');
+      restoredObjectUrls.current.forEach((url) => URL.revokeObjectURL(url));
+      restoredObjectUrls.current = saved.uploads.map((upload) => upload.src);
+      setProject(saved);
+      setSelectedId(null);
+      setCurrentPage(0);
+      setSaveStatus('saved');
+      setMessage(`Opened ${saved.name}`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Project load failed.');
     }
   }
 
-  function newProject() {
-    clearProject();
-    commit(cloneProject(emptyProject), null);
+  async function createProjectFromModal() {
+    const next = createBlankProject(newProjectName.trim() || 'My Carousel', newProjectPages);
+    setProject(next);
+    setSelectedId(null);
     setCurrentPage(0);
-    setMessage('New project started');
+    setNewProjectOpen(false);
+    await saveProject(next);
+    await refreshProjects();
+    setMessage('New project created');
+  }
+
+  async function duplicateExistingProject(projectId: string) {
+    try {
+      const copy = await duplicateProject(projectId, id('project'));
+      await refreshProjects();
+      setMessage(`Duplicated ${copy.name}`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Duplicate failed.');
+    }
+  }
+
+  async function renameExistingProject(projectId: string, name: string) {
+    const nextName = name.trim();
+    if (!nextName) return;
+
+    try {
+      if (projectId === project.id) {
+        setProject((current) => ({ ...current, name: nextName }));
+      } else {
+        const saved = await loadProject(projectId);
+        if (!saved) {
+          setMessage('Project not found');
+          return;
+        }
+        await saveProject({ ...saved, name: nextName }, saved.thumbnail);
+        await refreshProjects();
+      }
+      setMessage('Project renamed');
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Rename failed.');
+    }
+  }
+
+  async function confirmDeleteProject() {
+    if (!deleteProjectId) return;
+
+    try {
+      await deleteProject(deleteProjectId);
+      const remaining = await listProjects();
+      setProjects(remaining);
+      setDeleteProjectId(null);
+
+      if (deleteProjectId === project.id) {
+        const next = remaining[0] ? await loadProject(remaining[0].id) : createBlankProject();
+        if (next) {
+          setProject(next);
+          setSelectedId(null);
+          setCurrentPage(0);
+          if (!remaining[0]) await saveProject(next);
+        }
+      }
+
+      if (!remaining.length) clearLastProjectId();
+      setMessage('Project deleted');
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Delete failed.');
+    }
+  }
+
+  function startNewProject() {
+    setNewProjectName('My Carousel');
+    setNewProjectPages(3);
+    setNewProjectOpen(true);
   }
 
   useEffect(() => {
@@ -918,6 +1167,15 @@ export default function CarouselEditor() {
           onChange={(event) => setProject({ ...project, name: event.target.value })}
           aria-label="Project name"
         />
+        <span className={`saveStatus ${saveStatus}`}>
+          {saveStatus === 'saving'
+            ? 'Saving...'
+            : saveStatus === 'failed'
+              ? 'Save failed'
+              : storageReady
+                ? 'Saved'
+                : 'Opening...'}
+        </span>
         <div className="topActions">
           <button className="iconButton" onClick={undo} disabled={!undoStack.length} title="Undo">
             ↶
@@ -991,8 +1249,13 @@ export default function CarouselEditor() {
           onDelete={deleteSelected}
           onMoveLayer={moveLayer}
           onSave={saveLocalProject}
-          onLoad={loadLocalProject}
-          onNew={newProject}
+          projects={projects}
+          saveStatus={saveStatus}
+          onOpenProject={openProject}
+          onRenameProject={renameExistingProject}
+          onDuplicateProject={duplicateExistingProject}
+          onRequestDeleteProject={setDeleteProjectId}
+          onNewProject={startNewProject}
         />
       </section>
 
@@ -1085,28 +1348,98 @@ export default function CarouselEditor() {
         <div className="modal" onClick={() => setExportOpen(false)}>
           <div className="exportCard" onClick={(event) => event.stopPropagation()}>
             <div className="previewHead">
-              <b>Export JPG</b>
-              <button onClick={() => setExportOpen(false)}>×</button>
+              <b>Export Carousel</b>
+              <button onClick={() => setExportOpen(false)} disabled={exporting}>×</button>
+            </div>
+            <div className="exportMeta">
+              <span>1080 × 1350 px</span>
+              <span>{exportTarget === 'all' ? `${project.pageCount} pages selected` : `Page ${currentPage + 1} selected`}</span>
+            </div>
+            <div className="segmented two">
+              {(['jpg', 'png'] as const).map((format) => (
+                <button
+                  key={format}
+                  className={exportFormat === format ? 'active' : ''}
+                  onClick={() => setExportFormat(format)}
+                  disabled={exporting}
+                >
+                  {format.toUpperCase()}
+                </button>
+              ))}
+            </div>
+            {exportFormat === 'jpg' && (
+              <label>
+                JPG quality
+                <select value={quality} onChange={(event) => setQuality(Number(event.target.value) as ExportQuality)} disabled={exporting}>
+                  <option value={0.8}>80%</option>
+                  <option value={0.9}>90%</option>
+                  <option value={0.95}>95%</option>
+                  <option value={1}>100%</option>
+                </select>
+              </label>
+            )}
+            <div className="segmented two">
+              <button className={exportTarget === 'all' ? 'active' : ''} onClick={() => setExportTarget('all')} disabled={exporting}>
+                All pages
+              </button>
+              <button className={exportTarget === 'selected' ? 'active' : ''} onClick={() => setExportTarget('selected')} disabled={exporting}>
+                Current page
+              </button>
+            </div>
+            <label className="checkRow">
+              <input type="checkbox" checked={zipExport} onChange={(event) => setZipExport(event.target.checked)} disabled={exporting} />
+              Download as ZIP
+            </label>
+            <label className="checkRow">
+              <input type="checkbox" checked={individualExport} onChange={(event) => setIndividualExport(event.target.checked)} disabled={exporting} />
+              Also download individual files
+            </label>
+            {exportProgress && <div className="progressNote">{exportProgress}</div>}
+            <button className="exportButton wide" onClick={exportCarousel} disabled={exporting}>
+              {exporting ? 'Exporting...' : 'Download'}
+            </button>
+          </div>
+        </div>
+      )}
+      {newProjectOpen && (
+        <div className="modal" onClick={() => setNewProjectOpen(false)}>
+          <div className="exportCard" onClick={(event) => event.stopPropagation()}>
+            <div className="previewHead">
+              <b>New Project</b>
+              <button onClick={() => setNewProjectOpen(false)}>×</button>
             </div>
             <label>
-              Quality
-              <select value={quality} onChange={(event) => setQuality(Number(event.target.value) as ExportQuality)}>
-                <option value={0.8}>80%</option>
-                <option value={0.9}>90%</option>
-                <option value={0.95}>95%</option>
-                <option value={1}>100%</option>
-              </select>
+              Name
+              <input value={newProjectName} onChange={(event) => setNewProjectName(event.target.value)} autoFocus />
             </label>
             <label>
               Pages
-              <select value={exportTarget} onChange={(event) => setExportTarget(event.target.value as 'all' | 'selected')}>
-                <option value="all">All pages</option>
-                <option value="selected">Selected page</option>
-              </select>
+              <input
+                type="number"
+                min={MIN_PAGES}
+                max={MAX_PAGES}
+                value={newProjectPages}
+                onChange={(event) => setNewProjectPages(clamp(Number(event.target.value), MIN_PAGES, MAX_PAGES))}
+              />
             </label>
-            <button className="exportButton wide" onClick={exportJpg}>
-              Download JPG
+            <button className="exportButton wide" onClick={createProjectFromModal}>
+              Create Project
             </button>
+          </div>
+        </div>
+      )}
+      {deleteProjectId && (
+        <div className="modal" onClick={() => setDeleteProjectId(null)}>
+          <div className="exportCard" onClick={(event) => event.stopPropagation()}>
+            <div className="previewHead">
+              <b>Delete Project</b>
+              <button onClick={() => setDeleteProjectId(null)}>×</button>
+            </div>
+            <p className="panelNote">Delete this local project from this browser? This cannot be undone.</p>
+            <div className="modalActions">
+              <button onClick={() => setDeleteProjectId(null)}>Cancel</button>
+              <button className="dangerButton" onClick={confirmDeleteProject}>Delete</button>
+            </div>
           </div>
         </div>
       )}
@@ -1361,8 +1694,13 @@ function PanelContent({
   onDelete,
   onMoveLayer,
   onSave,
-  onLoad,
-  onNew,
+  projects,
+  saveStatus,
+  onOpenProject,
+  onRenameProject,
+  onDuplicateProject,
+  onRequestDeleteProject,
+  onNewProject,
 }: {
   activeTool: ToolName;
   project: CarouselProject;
@@ -1381,8 +1719,13 @@ function PanelContent({
   onDelete: () => void;
   onMoveLayer: (id: string, direction: 'front' | 'back' | 'forward' | 'backward') => void;
   onSave: () => void;
-  onLoad: () => void;
-  onNew: () => void;
+  projects: ProjectSummary[];
+  saveStatus: 'idle' | 'saving' | 'saved' | 'failed';
+  onOpenProject: (projectId: string) => void;
+  onRenameProject: (projectId: string, name: string) => void;
+  onDuplicateProject: (projectId: string) => void;
+  onRequestDeleteProject: (projectId: string) => void;
+  onNewProject: () => void;
 }) {
   if (activeTool === 'Templates') {
     return (
@@ -1561,10 +1904,47 @@ function PanelContent({
     return (
       <div className="panelSection">
         <h2>Projects</h2>
-        <button onClick={onSave}>Save Project</button>
-        <button onClick={onLoad}>Load Project</button>
-        <button onClick={onNew}>New Project</button>
-        <p className="panelNote">Saved locally in this browser. Uploaded images are stored as data URLs for V1.</p>
+        <button className="primaryPanelButton" onClick={onNewProject}>New Project</button>
+        <div className="currentProjectBox">
+          <span>Current project</span>
+          <b>{project.name || 'Untitled'}</b>
+          <small>
+            {saveStatus === 'saving' ? 'Autosaving...' : saveStatus === 'failed' ? 'Autosave failed' : 'Saved locally'}
+          </small>
+        </div>
+        <button onClick={onSave}>Save now</button>
+        <div className="projectList">
+          {projects.map((item) => (
+            <div key={item.id} className={item.id === project.id ? 'projectCard active' : 'projectCard'}>
+              <button className="projectThumb" onClick={() => onOpenProject(item.id)} title={`Open ${item.name}`}>
+                {item.thumbnail ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={item.thumbnail} alt="" />
+                ) : (
+                  <span>{item.name.slice(0, 1).toUpperCase() || 'C'}</span>
+                )}
+              </button>
+              <div className="projectDetails">
+                <b>{item.name || 'Untitled'}</b>
+                <span>{item.pageCount} pages · {timeAgo(item.updatedAt)}</span>
+                <div className="projectActions">
+                  <button onClick={() => onOpenProject(item.id)} disabled={item.id === project.id}>Open</button>
+                  <button
+                    onClick={() => {
+                      const nextName = window.prompt('Rename project', item.name);
+                      if (nextName !== null) onRenameProject(item.id, nextName);
+                    }}
+                  >
+                    Rename
+                  </button>
+                  <button onClick={() => onDuplicateProject(item.id)}>Duplicate</button>
+                  <button onClick={() => onRequestDeleteProject(item.id)}>Delete</button>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+        <p className="panelNote">Projects and image assets are stored locally in this browser using IndexedDB.</p>
       </div>
     );
   }
