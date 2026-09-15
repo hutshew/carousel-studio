@@ -48,6 +48,42 @@ async function drawObject(
     return;
   }
 
+  if (object.type === 'placeholder') {
+    drawRotated(ctx, object, () => {
+      ctx.fillStyle = '#e5e7eb';
+      ctx.strokeStyle = '#cbd5e1';
+      ctx.lineWidth = 4;
+      ctx.fillRect(0, 0, object.width, object.height);
+      ctx.strokeRect(0, 0, object.width, object.height);
+      ctx.fillStyle = '#64748b';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.font = '700 42px Arial';
+      ctx.fillText(object.label, object.width / 2, object.height / 2 + 42, object.width - 80);
+      ctx.font = '700 80px Arial';
+      ctx.fillText('+', object.width / 2, object.height / 2 - 36);
+    });
+    return;
+  }
+
+  if (object.type === 'shape') {
+    drawRotated(ctx, object, () => {
+      ctx.fillStyle = object.fill;
+      ctx.strokeStyle = object.stroke;
+      ctx.lineWidth = object.strokeWidth;
+      if (object.shape === 'ellipse') {
+        ctx.beginPath();
+        ctx.ellipse(object.width / 2, object.height / 2, object.width / 2, object.height / 2, 0, 0, Math.PI * 2);
+        ctx.fill();
+        if (object.strokeWidth > 0) ctx.stroke();
+      } else {
+        ctx.fillRect(0, 0, object.width, object.height);
+        if (object.strokeWidth > 0) ctx.strokeRect(0, 0, object.width, object.height);
+      }
+    });
+    return;
+  }
+
   drawRotated(ctx, object, () => {
     ctx.fillStyle = object.fill;
     ctx.textAlign = object.align;

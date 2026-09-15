@@ -10,7 +10,10 @@ import {
   ExportQuality,
   MAX_PAGES,
   MIN_PAGES,
+  PAGE_HEIGHT,
   PAGE_WIDTH,
+  PlaceholderObject,
+  ShapeObject,
   TextObject,
   ToolName,
   UploadedImage,
@@ -29,6 +32,8 @@ const tools: { icon: string; label: ToolName }[] = [
 
 const fonts = ['Arial', 'Helvetica', 'Georgia', 'Times New Roman', 'Verdana', 'Trebuchet MS'];
 const presets = ['#ffffff', '#f4f1ea', '#111827', '#f97316', '#0f766e', '#2563eb', '#e11d48'];
+const MIN_ZOOM = 20;
+const MAX_ZOOM = 100;
 
 const emptyProject: CarouselProject = {
   name: 'My Carousel',
@@ -101,13 +106,53 @@ function cloneProject(project: CarouselProject): CarouselProject {
   return JSON.parse(JSON.stringify(project)) as CarouselProject;
 }
 
+function clamp(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function textObject(input: Omit<TextObject, 'id' | 'type' | 'rotation' | 'opacity' | 'fontFamily' | 'italic' | 'align'> & Partial<Pick<TextObject, 'fontFamily' | 'italic' | 'align' | 'opacity' | 'rotation'>>) {
+  return {
+    id: id('text'),
+    type: 'text' as const,
+    rotation: 0,
+    opacity: 1,
+    fontFamily: 'Arial',
+    italic: false,
+    align: 'left' as const,
+    ...input,
+  };
+}
+
+function placeholderObject(input: Omit<PlaceholderObject, 'id' | 'type' | 'rotation' | 'opacity' | 'label'> & Partial<Pick<PlaceholderObject, 'label' | 'opacity' | 'rotation'>>) {
+  return {
+    id: id('placeholder'),
+    type: 'placeholder' as const,
+    label: 'Add photo',
+    rotation: 0,
+    opacity: 1,
+    ...input,
+  };
+}
+
+function shapeObject(input: Omit<ShapeObject, 'id' | 'type' | 'rotation' | 'opacity'> & Partial<Pick<ShapeObject, 'opacity' | 'rotation'>>) {
+  return {
+    id: id('shape'),
+    type: 'shape' as const,
+    rotation: 0,
+    opacity: 1,
+    ...input,
+  };
+}
+
 export default function CarouselEditor() {
   const inputRef = useRef<HTMLInputElement>(null);
+  const scrollerRef = useRef<HTMLDivElement>(null);
   const [project, setProject] = useState<CarouselProject>(emptyProject);
   const [activeTool, setActiveTool] = useState<ToolName>('Upload');
+  const [panelCollapsed, setPanelCollapsed] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [currentPage, setCurrentPage] = useState(0);
-  const [zoom, setZoom] = useState(50);
+  const [zoom, setZoom] = useState(42);
   const [undoStack, setUndoStack] = useState<CarouselProject[]>([]);
   const [redoStack, setRedoStack] = useState<CarouselProject[]>([]);
   const [clipboard, setClipboard] = useState<EditorObject | null>(null);
@@ -122,6 +167,22 @@ export default function CarouselEditor() {
     () => project.objects.find((object) => object.id === selectedId) ?? null,
     [project.objects, selectedId],
   );
+
+  function calculateFitZoom() {
+    const scroller = scrollerRef.current;
+    if (!scroller) return 42;
+
+    const verticalPadding = 140;
+    const horizontalPadding = 72;
+    const heightZoom = ((scroller.clientHeight - verticalPadding) / PAGE_HEIGHT) * 100;
+    const targetVisiblePages = project.pageCount >= 3 ? 1.55 : project.pageCount;
+    const widthZoom = ((scroller.clientWidth - horizontalPadding) / (PAGE_WIDTH * targetVisiblePages)) * 100;
+    return Math.round(clamp(Math.min(heightZoom, widthZoom), MIN_ZOOM, MAX_ZOOM));
+  }
+
+  function fitToWorkspace() {
+    setZoom(calculateFitZoom());
+  }
 
   function commit(next: CarouselProject, nextSelectedId = selectedId) {
     setUndoStack((stack) => [...stack.slice(-49), cloneProject(project)]);
@@ -150,6 +211,22 @@ export default function CarouselEditor() {
     setMessage('Redo');
   }
 
+  useEffect(() => {
+    fitToWorkspace();
+
+    const scroller = scrollerRef.current;
+    if (!scroller) return;
+
+    const observer = new ResizeObserver(() => {
+      setZoom(calculateFitZoom());
+    });
+    observer.observe(scroller);
+
+    return () => observer.disconnect();
+    // Fit intentionally tracks layout inputs rather than every project edit.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [panelCollapsed, project.pageCount]);
+
   function updateObject(object: EditorObject) {
     commit({ ...project, objects: project.objects.map((item) => (item.id === object.id ? object : item)) });
   }
@@ -175,28 +252,50 @@ export default function CarouselEditor() {
     setActiveTool('Photos');
   }
 
-  function addText() {
+  function addText(kind: 'heading' | 'subheading' | 'body' = 'heading') {
+    const settings = {
+      heading: { text: 'Heading', fontSize: 96, width: 760, height: 130, bold: true },
+      subheading: { text: 'Subheading', fontSize: 52, width: 720, height: 80, bold: true },
+      body: { text: 'Body text goes here', fontSize: 34, width: 680, height: 120, bold: false },
+    }[kind];
     const object: TextObject = {
       id: id('text'),
       type: 'text',
-      name: 'Text - Double click to edit',
-      text: 'Double click to edit',
+      name: `Text - ${settings.text}`,
+      text: settings.text,
       x: currentPage * PAGE_WIDTH + 160,
       y: 260,
-      width: 720,
-      height: 120,
+      width: settings.width,
+      height: settings.height,
       rotation: 0,
       opacity: 1,
-      fontSize: 64,
+      fontSize: settings.fontSize,
       fontFamily: 'Arial',
       fill: '#111827',
-      bold: true,
+      bold: settings.bold,
       italic: false,
       align: 'left',
     };
 
     commit({ ...project, objects: [...project.objects, object] }, object.id);
     setActiveTool('Text');
+  }
+
+  function addShape(shape: 'rect' | 'ellipse') {
+    const object = shapeObject({
+      name: shape === 'rect' ? 'Shape - Rectangle' : 'Shape - Ellipse',
+      shape,
+      x: currentPage * PAGE_WIDTH + 180,
+      y: 300,
+      width: shape === 'rect' ? 420 : 360,
+      height: 260,
+      fill: '#e2e8f0',
+      stroke: '#94a3b8',
+      strokeWidth: 3,
+    });
+
+    commit({ ...project, objects: [...project.objects, object] }, object.id);
+    setActiveTool('Elements');
   }
 
   function deleteSelected() {
@@ -324,95 +423,215 @@ export default function CarouselEditor() {
   }
 
   function applyTemplate(template: 'minimal' | 'travel' | 'dump') {
-    const baseX = currentPage * PAGE_WIDTH;
-    const common = {
-      rotation: 0,
-      opacity: 1,
-      fontFamily: 'Arial',
-      italic: false,
-      align: 'left' as const,
-    };
-    const objects: TextObject[] =
+    const p1 = 0;
+    const p2 = PAGE_WIDTH;
+    const p3 = PAGE_WIDTH * 2;
+    const objects: EditorObject[] =
       template === 'minimal'
         ? [
-            {
-              ...common,
-              id: id('template-text'),
-              type: 'text',
+            textObject({
               name: 'Text - Minimal title',
-              text: 'A clean idea\nacross pages',
-              x: baseX + 132,
+              text: 'A CLEAN\nIDEA',
+              x: p1 + 130,
               y: 390,
-              width: 840,
-              height: 250,
+              width: 760,
+              height: 310,
+              fontSize: 132,
+              fill: '#111827',
+              bold: true,
+            }),
+            textObject({
+              name: 'Text - Minimal subtitle',
+              text: 'Whitespace, rhythm, and one strong story.',
+              x: p1 + 138,
+              y: 760,
+              width: 650,
+              height: 70,
+              fontSize: 34,
+              fill: '#64748b',
+              bold: false,
+            }),
+            placeholderObject({
+              name: 'Photo placeholder - Minimal feature',
+              x: p2 + 150,
+              y: 210,
+              width: 780,
+              height: 760,
+            }),
+            textObject({
+              name: 'Text - Minimal page note',
+              text: 'Drop in a hero image or product moment.',
+              x: p2 + 170,
+              y: 1035,
+              width: 720,
+              height: 58,
+              fontSize: 30,
+              fill: '#475569',
+              bold: false,
+              align: 'center',
+            }),
+            textObject({
+              name: 'Text - Minimal close',
+              text: 'SAVE THIS\nFOR LATER',
+              x: p3 + 150,
+              y: 455,
+              width: 820,
+              height: 230,
               fontSize: 96,
               fill: '#111827',
               bold: true,
-            },
+              align: 'center',
+            }),
+            textObject({
+              name: 'Text - Minimal CTA',
+              text: 'Export clean 1080 × 1350 JPG pages.',
+              x: p3 + 210,
+              y: 740,
+              width: 700,
+              height: 58,
+              fontSize: 28,
+              fill: '#64748b',
+              bold: false,
+              align: 'center',
+            }),
           ]
         : template === 'travel'
           ? [
-              {
-                ...common,
-                id: id('template-text'),
-                type: 'text',
+              textObject({
+                name: 'Text - Travel',
+                text: 'TRAVEL',
+                x: p1 + 118,
+                y: 250,
+                width: 800,
+                height: 160,
+                fontSize: 138,
+                fill: '#0f172a',
+                bold: true,
+              }),
+              textObject({
                 name: 'Text - Travel story',
                 text: 'CHIANG MAI',
-                x: baseX + 720,
-                y: 610,
-                width: 980,
+                x: p1 + 126,
+                y: 430,
+                width: 840,
                 height: 120,
-                fontSize: 82,
+                fontSize: 86,
                 fill: '#0f766e',
                 bold: true,
-              },
-              {
-                ...common,
-                id: id('template-note'),
-                type: 'text',
+              }),
+              textObject({
                 name: 'Text - Travel note',
-                text: 'temples, coffee, and mountain light',
-                x: baseX + 760,
-                y: 740,
-                width: 820,
+                text: 'temples, coffee, mountain light',
+                x: p1 + 132,
+                y: 565,
+                width: 680,
                 height: 70,
-                fontSize: 36,
+                fontSize: 34,
                 fill: '#334155',
                 bold: false,
-              },
+              }),
+              placeholderObject({
+                name: 'Photo placeholder - Cross-page travel',
+                x: p1 + 910,
+                y: 235,
+                width: 940,
+                height: 650,
+              }),
+              textObject({
+                name: 'Text - Location title',
+                text: 'OLD CITY\nWALK',
+                x: p2 + 160,
+                y: 935,
+                width: 720,
+                height: 160,
+                fontSize: 70,
+                fill: '#0f172a',
+                bold: true,
+                align: 'center',
+              }),
+              placeholderObject({
+                name: 'Photo placeholder - Travel finale',
+                x: p3 + 120,
+                y: 180,
+                width: 840,
+                height: 820,
+              }),
+              textObject({
+                name: 'Text - Travel final note',
+                text: 'A slow weekend guide for the north.',
+                x: p3 + 150,
+                y: 1085,
+                width: 780,
+                height: 60,
+                fontSize: 30,
+                fill: '#475569',
+                bold: false,
+                align: 'center',
+              }),
             ]
           : [
-              {
-                ...common,
-                id: id('template-text'),
-                type: 'text',
+              textObject({
                 name: 'Text - Photo dump',
-                text: 'PHOTO DUMP',
-                x: baseX + 120,
-                y: 112,
+                text: 'PHOTO\nDUMP\n01',
+                x: p1 + 130,
+                y: 260,
                 width: 900,
-                height: 120,
-                fontSize: 76,
+                height: 470,
+                fontSize: 126,
                 fill: '#111827',
                 bold: true,
-              },
-              {
-                ...common,
-                id: id('template-caption'),
-                type: 'text',
-                name: 'Text - Caption',
+              }),
+              textObject({
+                name: 'Text - Photo dump date',
                 text: 'moments worth sliding through',
-                x: baseX + 128,
-                y: 1240,
-                width: 820,
-                height: 60,
+                x: p1 + 140,
+                y: 800,
+                width: 650,
+                height: 70,
                 fontSize: 32,
                 fill: '#4b5563',
                 bold: false,
-              },
+              }),
+              placeholderObject({
+                name: 'Photo placeholder - Dump center',
+                x: p2 + 120,
+                y: 160,
+                width: 840,
+                height: 900,
+              }),
+              placeholderObject({
+                name: 'Photo placeholder - Dump finale',
+                x: p3 + 130,
+                y: 210,
+                width: 660,
+                height: 760,
+              }),
+              textObject({
+                name: 'Text - Dump caption',
+                text: 'the little scenes that made the week',
+                x: p3 + 160,
+                y: 1035,
+                width: 760,
+                height: 76,
+                fontSize: 34,
+                fill: '#334155',
+                bold: false,
+              }),
+              shapeObject({
+                name: 'Shape - Accent block',
+                shape: 'rect',
+                x: p3 + 810,
+                y: 210,
+                width: 110,
+                height: 760,
+                fill: '#111827',
+                stroke: '#111827',
+                strokeWidth: 0,
+              }),
             ];
 
-    commit({ ...project, objects: [...project.objects, ...objects] }, objects[0]?.id ?? selectedId);
+    commit({ ...project, pageCount: Math.max(3, project.pageCount), objects }, objects[0]?.id ?? selectedId);
+    setCurrentPage(0);
     setActiveTool('Layers');
   }
 
@@ -511,7 +730,7 @@ export default function CarouselEditor() {
   }, [clipboard, project, selectedId, selectedObject, undoStack, redoStack]);
 
   return (
-    <main className="appShell">
+    <main className={panelCollapsed ? 'appShell panelCollapsed' : 'appShell'}>
       <header className="topbar">
         <div className="brand">
           <span className="brandMark">C</span>
@@ -566,6 +785,13 @@ export default function CarouselEditor() {
       </aside>
 
       <section className="panel">
+        <button
+          className="collapseButton"
+          onClick={() => setPanelCollapsed((collapsed) => !collapsed)}
+          title={panelCollapsed ? 'Expand panel' : 'Collapse panel'}
+        >
+          {panelCollapsed ? '›' : '‹'}
+        </button>
         <PanelContent
           activeTool={activeTool}
           project={project}
@@ -575,6 +801,7 @@ export default function CarouselEditor() {
           onInsertImage={insertImage}
           onSetDragUpload={setDragUpload}
           onAddText={addText}
+          onAddShape={addShape}
           onApplyTemplate={applyTemplate}
           onChangeProject={(next) => commit(next)}
           onChangeObject={updateObject}
@@ -596,7 +823,7 @@ export default function CarouselEditor() {
           </div>
           <div className="badge">{project.pageCount} pages</div>
         </div>
-        <div className="canvasScroller">
+        <div className="canvasScroller" ref={scrollerRef}>
           <EditorStage
             project={project}
             selectedId={selectedId}
@@ -625,10 +852,10 @@ export default function CarouselEditor() {
         <button onClick={() => movePage(-1)}>Move Left</button>
         <button onClick={() => movePage(1)}>Move Right</button>
         <div className="zoom">
-          <button onClick={() => setZoom((value) => Math.max(25, value - 10))}>−</button>
+          <button onClick={() => setZoom((value) => Math.max(MIN_ZOOM, value - 10))}>−</button>
           <span>{zoom}%</span>
-          <button onClick={() => setZoom((value) => Math.min(100, value + 10))}>+</button>
-          <button onClick={() => setZoom(50)}>Fit</button>
+          <button onClick={() => setZoom((value) => Math.min(MAX_ZOOM, value + 10))}>+</button>
+          <button onClick={fitToWorkspace}>Fit</button>
         </div>
       </footer>
 
@@ -691,6 +918,7 @@ function PanelContent({
   onInsertImage,
   onSetDragUpload,
   onAddText,
+  onAddShape,
   onApplyTemplate,
   onChangeProject,
   onChangeObject,
@@ -709,7 +937,8 @@ function PanelContent({
   onUpload: () => void;
   onInsertImage: (upload: UploadedImage) => void;
   onSetDragUpload: (upload: UploadedImage | null) => void;
-  onAddText: () => void;
+  onAddText: (kind?: 'heading' | 'subheading' | 'body') => void;
+  onAddShape: (shape: 'rect' | 'ellipse') => void;
   onApplyTemplate: (template: 'minimal' | 'travel' | 'dump') => void;
   onChangeProject: (project: CarouselProject) => void;
   onChangeObject: (object: EditorObject) => void;
@@ -725,9 +954,18 @@ function PanelContent({
     return (
       <div className="panelSection">
         <h2>Templates</h2>
-        <button onClick={() => onApplyTemplate('minimal')}>Minimal</button>
-        <button onClick={() => onApplyTemplate('travel')}>Travel Story</button>
-        <button onClick={() => onApplyTemplate('dump')}>Photo Dump</button>
+        <button className="templateCard" onClick={() => onApplyTemplate('minimal')}>
+          <b>Minimal</b>
+          <span>Whitespace, hero text, image block, final CTA.</span>
+        </button>
+        <button className="templateCard" onClick={() => onApplyTemplate('travel')}>
+          <b>Travel Story</b>
+          <span>Cross-page image placeholder with destination notes.</span>
+        </button>
+        <button className="templateCard" onClick={() => onApplyTemplate('dump')}>
+          <b>Photo Dump</b>
+          <span>Large photo spaces with a bold opening page.</span>
+        </button>
       </div>
     );
   }
@@ -739,6 +977,9 @@ function PanelContent({
         <button className="primaryPanelButton" onClick={onUpload}>
           Upload photos
         </button>
+        {!project.uploads.length && (
+          <p className="panelNote">Upload JPG, PNG, or WEBP images, then click or drag a thumbnail onto the canvas.</p>
+        )}
         <div className="photoGrid">
           {project.uploads.map((upload) => (
             <button key={upload.id} onClick={() => onInsertImage(upload)}>
@@ -763,9 +1004,13 @@ function PanelContent({
     return (
       <div className="panelSection">
         <h2>Text</h2>
-        <button className="primaryPanelButton" onClick={onAddText}>
-          Add text
-        </button>
+        <div className="textPresetGrid">
+          <button className="primaryPanelButton" onClick={() => onAddText('heading')}>
+            Add Heading
+          </button>
+          <button onClick={() => onAddText('subheading')}>Add Subheading</button>
+          <button onClick={() => onAddText('body')}>Add Body Text</button>
+        </div>
         {textObject && (
           <>
             <label>
@@ -893,9 +1138,11 @@ function PanelContent({
   return (
     <div className="panelSection">
       <h2>Elements</h2>
-      <button onClick={onAddText}>Add text element</button>
+      <button onClick={() => onAddShape('rect')}>Add rectangle</button>
+      <button onClick={() => onAddShape('ellipse')}>Add ellipse</button>
+      <button onClick={() => onAddText('body')}>Add label text</button>
       <p className="panelNote">
-        Current page starts at x={currentPage * PAGE_WIDTH}. Objects can be moved freely across the 1080px page boundaries.
+        Page {currentPage + 1} starts at x={currentPage * PAGE_WIDTH}. Objects can move freely across 1080px boundaries.
       </p>
     </div>
   );

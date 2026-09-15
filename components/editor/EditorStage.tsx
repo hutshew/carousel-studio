@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Image as KonvaImage, Layer, Rect, Stage, Text, Transformer } from 'react-konva';
+import { Ellipse, Group, Image as KonvaImage, Layer, Rect, Stage, Text, Transformer } from 'react-konva';
 import type Konva from 'konva';
 import {
   CarouselProject,
@@ -165,6 +165,157 @@ function EditableText({
   );
 }
 
+function EditablePlaceholder({
+  object,
+  selected,
+  registerNode,
+  onSelect,
+  onChangeObject,
+}: {
+  object: EditorObject;
+  selected: boolean;
+  registerNode: (id: string, node: Konva.Node | null) => void;
+  onSelect: (id: string) => void;
+  onChangeObject: (object: EditorObject) => void;
+}) {
+  if (object.type !== 'placeholder') return null;
+
+  return (
+    <Group
+      ref={(node) => registerNode(object.id, node)}
+      id={object.id}
+      x={object.x}
+      y={object.y}
+      width={object.width}
+      height={object.height}
+      rotation={object.rotation}
+      opacity={object.opacity}
+      draggable
+      onClick={() => onSelect(object.id)}
+      onTap={() => onSelect(object.id)}
+      onDragEnd={(event) => {
+        onChangeObject({ ...object, x: event.target.x(), y: event.target.y() });
+      }}
+      onTransformEnd={(event) => {
+        const node = event.target;
+        const scaleX = node.scaleX();
+        const scaleY = node.scaleY();
+        node.scaleX(1);
+        node.scaleY(1);
+        onChangeObject({
+          ...object,
+          x: node.x(),
+          y: node.y(),
+          width: Math.max(90, object.width * scaleX),
+          height: Math.max(90, object.height * scaleY),
+          rotation: node.rotation(),
+        });
+      }}
+    >
+      <Rect
+        width={object.width}
+        height={object.height}
+        fill="#e5e7eb"
+        stroke={selected ? '#111827' : '#cbd5e1'}
+        strokeWidth={selected ? 4 : 2}
+        dash={[18, 14]}
+      />
+      <Text
+        text="+"
+        width={object.width}
+        y={object.height / 2 - 88}
+        align="center"
+        fontSize={88}
+        fontFamily="Arial"
+        fontStyle="700"
+        fill="#64748b"
+        listening={false}
+      />
+      <Text
+        text={object.label}
+        width={object.width}
+        y={object.height / 2 + 22}
+        align="center"
+        fontSize={42}
+        fontFamily="Arial"
+        fontStyle="700"
+        fill="#64748b"
+        listening={false}
+      />
+    </Group>
+  );
+}
+
+function EditableShape({
+  object,
+  selected,
+  registerNode,
+  onSelect,
+  onChangeObject,
+}: {
+  object: EditorObject;
+  selected: boolean;
+  registerNode: (id: string, node: Konva.Node | null) => void;
+  onSelect: (id: string) => void;
+  onChangeObject: (object: EditorObject) => void;
+}) {
+  if (object.type !== 'shape') return null;
+
+  return (
+    <Group
+      ref={(node) => registerNode(object.id, node)}
+      id={object.id}
+      x={object.x}
+      y={object.y}
+      width={object.width}
+      height={object.height}
+      rotation={object.rotation}
+      opacity={object.opacity}
+      draggable
+      onClick={() => onSelect(object.id)}
+      onTap={() => onSelect(object.id)}
+      onDragEnd={(event: Konva.KonvaEventObject<DragEvent>) => {
+      onChangeObject({ ...object, x: event.target.x(), y: event.target.y() });
+      }}
+      onTransformEnd={(event: Konva.KonvaEventObject<Event>) => {
+      const node = event.target;
+      const scaleX = node.scaleX();
+      const scaleY = node.scaleY();
+      node.scaleX(1);
+      node.scaleY(1);
+      onChangeObject({
+        ...object,
+        x: node.x(),
+        y: node.y(),
+        width: Math.max(40, object.width * scaleX),
+        height: Math.max(40, object.height * scaleY),
+        rotation: node.rotation(),
+      });
+      }}
+    >
+      {object.shape === 'ellipse' ? (
+        <Ellipse
+          x={object.width / 2}
+          y={object.height / 2}
+          radiusX={object.width / 2}
+          radiusY={object.height / 2}
+          fill={object.fill}
+          stroke={selected ? '#111827' : object.stroke}
+          strokeWidth={selected ? Math.max(3, object.strokeWidth) : object.strokeWidth}
+        />
+      ) : (
+        <Rect
+          width={object.width}
+          height={object.height}
+          fill={object.fill}
+          stroke={selected ? '#111827' : object.stroke}
+          strokeWidth={selected ? Math.max(3, object.strokeWidth) : object.strokeWidth}
+        />
+      )}
+    </Group>
+  );
+}
+
 export default function EditorStage({
   project,
   selectedId,
@@ -208,6 +359,13 @@ export default function EditorStage({
 
   return (
     <div className="stageFrame">
+      <div className="pageLabels" style={{ width: canvasWidth * scale }}>
+        {Array.from({ length: project.pageCount }).map((_, index) => (
+          <span key={index} style={{ left: index * PAGE_WIDTH * scale }}>
+            PAGE {String(index + 1).padStart(2, '0')}
+          </span>
+        ))}
+      </div>
       <div
         className="stageScaleBox"
         style={{ width: canvasWidth * scale, height: PAGE_HEIGHT * scale }}
@@ -234,24 +392,12 @@ export default function EditorStage({
         >
           <Layer>
             <Rect x={0} y={0} width={canvasWidth} height={PAGE_HEIGHT} fill={project.background} />
-            {Array.from({ length: project.pageCount }).map((_, index) => (
-              <Text
-                key={`label-${index}`}
-                text={`PAGE ${String(index + 1).padStart(2, '0')}`}
-                x={index * PAGE_WIDTH + 32}
-                y={28}
-                fontSize={28}
-                fontFamily="Arial"
-                fontStyle="700"
-                fill="rgba(17,24,39,0.28)"
-                listening={false}
-              />
-            ))}
           </Layer>
 
           <Layer>
-            {project.objects.map((object) =>
-              object.type === 'image' ? (
+            {project.objects.map((object) => {
+              if (object.type === 'image') {
+                return (
                 <EditableImage
                   key={object.id}
                   object={object}
@@ -261,7 +407,36 @@ export default function EditorStage({
                   onSelect={onSelect}
                   onChangeObject={onChangeObject}
                 />
-              ) : (
+                );
+              }
+
+              if (object.type === 'placeholder') {
+                return (
+                  <EditablePlaceholder
+                    key={object.id}
+                    object={object}
+                    selected={selectedId === object.id}
+                    registerNode={registerNode}
+                    onSelect={onSelect}
+                    onChangeObject={onChangeObject}
+                  />
+                );
+              }
+
+              if (object.type === 'shape') {
+                return (
+                  <EditableShape
+                    key={object.id}
+                    object={object}
+                    selected={selectedId === object.id}
+                    registerNode={registerNode}
+                    onSelect={onSelect}
+                    onChangeObject={onChangeObject}
+                  />
+                );
+              }
+
+              return (
                 <EditableText
                   key={object.id}
                   object={object}
@@ -271,8 +446,8 @@ export default function EditorStage({
                   onChangeObject={onChangeObject}
                   onEditText={onEditText}
                 />
-              ),
-            )}
+              );
+            })}
           </Layer>
 
           <Layer listening={false}>

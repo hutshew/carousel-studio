@@ -50,7 +50,20 @@ export type TextObject = BaseObject & {
   align: TextAlign;
 };
 
-export type EditorObject = ImageObject | TextObject;
+export type PlaceholderObject = BaseObject & {
+  type: 'placeholder';
+  label: string;
+};
+
+export type ShapeObject = BaseObject & {
+  type: 'shape';
+  shape: 'rect' | 'ellipse';
+  fill: string;
+  stroke: string;
+  strokeWidth: number;
+};
+
+export type EditorObject = ImageObject | TextObject | PlaceholderObject | ShapeObject;
 
 export type CarouselProject = {
   name: string;
