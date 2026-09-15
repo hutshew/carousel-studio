@@ -8,6 +8,7 @@ import {
   CarouselProject,
   EditorObject,
   ExportQuality,
+  ImageObject,
   MAX_PAGES,
   MIN_PAGES,
   PAGE_HEIGHT,
@@ -30,7 +31,18 @@ const tools: { icon: string; label: ToolName }[] = [
   { icon: '□', label: 'Projects' },
 ];
 
-const fonts = ['Arial', 'Helvetica', 'Georgia', 'Times New Roman', 'Verdana', 'Trebuchet MS'];
+const fonts = [
+  'Noto Sans Thai',
+  'Sarabun',
+  'Prompt',
+  'Kanit',
+  'Arial',
+  'Helvetica',
+  'Georgia',
+  'Times New Roman',
+  'Verdana',
+  'Trebuchet MS',
+];
 const presets = ['#ffffff', '#f4f1ea', '#111827', '#f97316', '#0f766e', '#2563eb', '#e11d48'];
 const MIN_ZOOM = 20;
 const MAX_ZOOM = 100;
@@ -146,6 +158,7 @@ function shapeObject(input: Omit<ShapeObject, 'id' | 'type' | 'rotation' | 'opac
 
 export default function CarouselEditor() {
   const inputRef = useRef<HTMLInputElement>(null);
+  const replaceInputRef = useRef<HTMLInputElement>(null);
   const scrollerRef = useRef<HTMLDivElement>(null);
   const [project, setProject] = useState<CarouselProject>(emptyProject);
   const [activeTool, setActiveTool] = useState<ToolName>('Upload');
@@ -158,6 +171,10 @@ export default function CarouselEditor() {
   const [clipboard, setClipboard] = useState<EditorObject | null>(null);
   const [dragUpload, setDragUpload] = useState<UploadedImage | null>(null);
   const [message, setMessage] = useState('Ready');
+  const [snapEnabled, setSnapEnabled] = useState(true);
+  const [cropModeId, setCropModeId] = useState<string | null>(null);
+  const [cropDraft, setCropDraft] = useState<ImageObject | null>(null);
+  const [contextMenu, setContextMenu] = useState<{ id: string; x: number; y: number } | null>(null);
   const [previewUrls, setPreviewUrls] = useState<string[] | null>(null);
   const [exportOpen, setExportOpen] = useState(false);
   const [quality, setQuality] = useState<ExportQuality>(0.95);
@@ -167,6 +184,13 @@ export default function CarouselEditor() {
     () => project.objects.find((object) => object.id === selectedId) ?? null,
     [project.objects, selectedId],
   );
+  const visibleProject = useMemo(() => {
+    if (!cropDraft) return project;
+    return {
+      ...project,
+      objects: project.objects.map((object) => (object.id === cropDraft.id ? cropDraft : object)),
+    };
+  }, [cropDraft, project]);
 
   function calculateFitZoom() {
     const scroller = scrollerRef.current;
@@ -189,6 +213,7 @@ export default function CarouselEditor() {
     setRedoStack([]);
     setProject(next);
     setSelectedId(nextSelectedId);
+    setContextMenu(null);
   }
 
   function undo() {
@@ -246,25 +271,157 @@ export default function CarouselEditor() {
       height,
       rotation: 0,
       opacity: 1,
+      cropX: 0,
+      cropY: 0,
+      cropWidth: upload.width,
+      cropHeight: upload.height,
+      flipX: false,
+      flipY: false,
     };
 
     commit({ ...project, objects: [...project.objects, object] }, object.id);
     setActiveTool('Photos');
   }
 
+  function selectedImage() {
+    return selectedObject?.type === 'image' ? selectedObject : null;
+  }
+
+  function selectedUpload(image: ImageObject | null) {
+    return image ? project.uploads.find((upload) => upload.id === image.imageId) ?? null : null;
+  }
+
+  function fillImageCrop(image: ImageObject) {
+    const upload = selectedUpload(image);
+    if (!upload) return image;
+
+    const frameRatio = image.width / image.height;
+    const sourceRatio = upload.width / upload.height;
+    let cropWidth = upload.width;
+    let cropHeight = upload.height;
+    let cropX = 0;
+    let cropY = 0;
+
+    if (sourceRatio > frameRatio) {
+      cropWidth = upload.height * frameRatio;
+      cropX = (upload.width - cropWidth) / 2;
+    } else {
+      cropHeight = upload.width / frameRatio;
+      cropY = (upload.height - cropHeight) / 2;
+    }
+
+    return { ...image, cropX, cropY, cropWidth, cropHeight };
+  }
+
+  function fitImageToFrame() {
+    const image = selectedImage();
+    const upload = selectedUpload(image);
+    if (!image || !upload) return;
+
+    const aspect = upload.height / upload.width;
+    updateObject({
+      ...image,
+      height: image.width * aspect,
+      cropX: 0,
+      cropY: 0,
+      cropWidth: upload.width,
+      cropHeight: upload.height,
+    });
+    setMessage('Image fitted');
+  }
+
+  function fillImageFrame() {
+    const image = selectedImage();
+    if (!image) return;
+    updateObject(fillImageCrop(image));
+    setMessage('Image filled frame');
+  }
+
+  function flipSelectedImage(axis: 'x' | 'y') {
+    const image = selectedImage();
+    if (!image) return;
+    updateObject({ ...image, flipX: axis === 'x' ? !image.flipX : image.flipX, flipY: axis === 'y' ? !image.flipY : image.flipY });
+  }
+
+  function startCrop(idToCrop = selectedId) {
+    const image = project.objects.find((object): object is ImageObject => object.id === idToCrop && object.type === 'image');
+    if (!image) return;
+    setCropModeId(image.id);
+    setCropDraft(cloneProject({ ...project, objects: [image] }).objects[0] as ImageObject);
+    setSelectedId(image.id);
+    setMessage('Crop mode');
+  }
+
+  function updateCropDraft(next: ImageObject) {
+    setCropDraft(next);
+  }
+
+  function applyCrop() {
+    if (!cropDraft) return;
+    commit({ ...project, objects: project.objects.map((object) => (object.id === cropDraft.id ? cropDraft : object)) }, cropDraft.id);
+    setCropDraft(null);
+    setCropModeId(null);
+    setMessage('Crop applied');
+  }
+
+  function cancelCrop() {
+    setCropDraft(null);
+    setCropModeId(null);
+    setMessage('Crop cancelled');
+  }
+
+  async function replaceSelectedImage(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    const image = selectedImage();
+    if (!file || !image) return;
+
+    try {
+      if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
+        setMessage('Unsupported file type. Use JPG, PNG, or WEBP.');
+        return;
+      }
+      const src = await fileToDataUrl(file);
+      const size = await getImageSize(src);
+      const upload = { id: id('upload'), name: file.name, src, ...size };
+      commit({
+        ...project,
+        uploads: [...project.uploads, upload],
+        objects: project.objects.map((object) =>
+          object.id === image.id
+            ? {
+                ...image,
+                name: `Photo - ${upload.name}`,
+                imageId: upload.id,
+                cropX: 0,
+                cropY: 0,
+                cropWidth: upload.width,
+                cropHeight: upload.height,
+                flipX: false,
+                flipY: false,
+              }
+            : object,
+        ),
+      });
+      setMessage('Image replaced');
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Image replacement failed.');
+    }
+  }
+
   function addText(kind: 'heading' | 'subheading' | 'body' = 'heading') {
     const settings = {
-      heading: { text: 'Heading', fontSize: 96, width: 760, height: 130, bold: true },
-      subheading: { text: 'Subheading', fontSize: 52, width: 720, height: 80, bold: true },
-      body: { text: 'Body text goes here', fontSize: 34, width: 680, height: 120, bold: false },
+      heading: { text: 'Heading', fontSize: 100, width: 760, height: 130, bold: true },
+      subheading: { text: 'Subheading', fontSize: 60, width: 720, height: 90, bold: true },
+      body: { text: 'Body text goes here', fontSize: 36, width: 680, height: 120, bold: false },
     }[kind];
     const object: TextObject = {
       id: id('text'),
       type: 'text',
       name: `Text - ${settings.text}`,
       text: settings.text,
-      x: currentPage * PAGE_WIDTH + 160,
-      y: 260,
+      x: currentPage * PAGE_WIDTH + PAGE_WIDTH / 2 - settings.width / 2,
+      y: PAGE_HEIGHT / 2 - settings.height / 2,
       width: settings.width,
       height: settings.height,
       rotation: 0,
@@ -281,17 +438,26 @@ export default function CarouselEditor() {
     setActiveTool('Text');
   }
 
-  function addShape(shape: 'rect' | 'ellipse') {
+  function addShape(shape: 'rect' | 'roundRect' | 'ellipse' | 'line') {
+    const isLine = shape === 'line';
     const object = shapeObject({
-      name: shape === 'rect' ? 'Shape - Rectangle' : 'Shape - Ellipse',
+      name:
+        shape === 'rect'
+          ? 'Shape - Rectangle'
+          : shape === 'roundRect'
+            ? 'Shape - Rounded rectangle'
+            : shape === 'line'
+              ? 'Shape - Line'
+              : 'Shape - Circle',
       shape,
       x: currentPage * PAGE_WIDTH + 180,
       y: 300,
-      width: shape === 'rect' ? 420 : 360,
-      height: 260,
-      fill: '#e2e8f0',
+      width: isLine ? 520 : shape === 'rect' || shape === 'roundRect' ? 420 : 320,
+      height: isLine ? 8 : shape === 'ellipse' ? 320 : 260,
+      fill: isLine ? 'transparent' : '#e2e8f0',
       stroke: '#94a3b8',
-      strokeWidth: 3,
+      strokeWidth: isLine ? 8 : 3,
+      radius: shape === 'roundRect' ? 42 : undefined,
     });
 
     commit({ ...project, objects: [...project.objects, object] }, object.id);
@@ -301,6 +467,7 @@ export default function CarouselEditor() {
   function deleteSelected() {
     if (!selectedId) return;
     commit({ ...project, objects: project.objects.filter((object) => object.id !== selectedId) }, null);
+    if (cropModeId === selectedId) cancelCrop();
   }
 
   function duplicateSelected() {
@@ -313,6 +480,22 @@ export default function CarouselEditor() {
       y: selectedObject.y + 60,
     };
     commit({ ...project, objects: [...project.objects, duplicate] }, duplicate.id);
+  }
+
+  function moveSelected(deltaX: number, deltaY: number) {
+    if (!selectedObject) return;
+    updateObject({ ...selectedObject, x: selectedObject.x + deltaX, y: selectedObject.y + deltaY });
+  }
+
+  function recenterSelected() {
+    if (!selectedObject) return;
+    const pageX = currentPage * PAGE_WIDTH;
+    updateObject({
+      ...selectedObject,
+      x: pageX + PAGE_WIDTH / 2 - selectedObject.width / 2,
+      y: PAGE_HEIGHT / 2 - selectedObject.height / 2,
+    });
+    setMessage('Object recentered');
   }
 
   function moveLayer(idToMove: string, direction: 'front' | 'back' | 'forward' | 'backward') {
@@ -358,31 +541,10 @@ export default function CarouselEditor() {
 
       const next = { ...project, uploads: [...project.uploads, ...uploads] };
       commit(next);
-      if (uploads[0]) insertImageIntoProject(next, uploads[0]);
       setMessage(`${uploads.length} image${uploads.length === 1 ? '' : 's'} uploaded`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Upload failed.');
     }
-  }
-
-  function insertImageIntoProject(sourceProject: CarouselProject, upload: UploadedImage) {
-    const maxWidth = 640;
-    const width = Math.min(maxWidth, upload.width);
-    const height = width * (upload.height / upload.width);
-    const object: EditorObject = {
-      id: id('image'),
-      type: 'image',
-      name: `Photo - ${upload.name}`,
-      imageId: upload.id,
-      x: currentPage * PAGE_WIDTH + 170,
-      y: 220,
-      width,
-      height,
-      rotation: 0,
-      opacity: 1,
-    };
-    setProject({ ...sourceProject, objects: [...sourceProject.objects, object] });
-    setSelectedId(object.id);
   }
 
   function addPage() {
@@ -700,7 +862,8 @@ export default function CarouselEditor() {
         event.preventDefault();
         deleteSelected();
       }
-      if (event.ctrlKey && event.key.toLowerCase() === 'z') {
+      const isMod = event.ctrlKey || event.metaKey;
+      if (isMod && event.key.toLowerCase() === 'z') {
         event.preventDefault();
         if (event.shiftKey) {
           redo();
@@ -708,18 +871,29 @@ export default function CarouselEditor() {
           undo();
         }
       }
-      if (event.ctrlKey && event.key.toLowerCase() === 'y') {
+      if (isMod && event.key.toLowerCase() === 'y') {
         event.preventDefault();
         redo();
       }
-      if (event.ctrlKey && event.key.toLowerCase() === 'c' && selectedObject) {
+      if (isMod && event.key.toLowerCase() === 'd' && selectedObject) {
+        event.preventDefault();
+        duplicateSelected();
+      }
+      if (isMod && event.key.toLowerCase() === 'c' && selectedObject) {
         event.preventDefault();
         setClipboard(selectedObject);
       }
-      if (event.ctrlKey && event.key.toLowerCase() === 'v' && clipboard) {
+      if (isMod && event.key.toLowerCase() === 'v' && clipboard) {
         event.preventDefault();
         const pasted = { ...clipboard, id: id(clipboard.type), name: `${clipboard.name} copy`, x: clipboard.x + 60, y: clipboard.y + 60 };
         commit({ ...project, objects: [...project.objects, pasted] }, pasted.id);
+      }
+      if (selectedObject && ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) {
+        event.preventDefault();
+        const amount = event.shiftKey ? 10 : 1;
+        const dx = event.key === 'ArrowLeft' ? -amount : event.key === 'ArrowRight' ? amount : 0;
+        const dy = event.key === 'ArrowUp' ? -amount : event.key === 'ArrowDown' ? amount : 0;
+        moveSelected(dx, dy);
       }
     }
 
@@ -782,6 +956,13 @@ export default function CarouselEditor() {
           multiple
           onChange={uploadFiles}
         />
+        <input
+          ref={replaceInputRef}
+          hidden
+          type="file"
+          accept="image/jpeg,image/png,image/webp"
+          onChange={replaceSelectedImage}
+        />
       </aside>
 
       <section className="panel">
@@ -823,9 +1004,26 @@ export default function CarouselEditor() {
           </div>
           <div className="badge">{project.pageCount} pages</div>
         </div>
+        <ContextualToolbar
+          selectedObject={cropDraft ?? selectedObject}
+          cropMode={Boolean(cropModeId)}
+          uploads={project.uploads}
+          onChangeObject={(object) => (cropModeId && object.type === 'image' ? updateCropDraft(object) : updateObject(object))}
+          onReplaceImage={() => replaceInputRef.current?.click()}
+          onCrop={() => startCrop()}
+          onFitImage={fitImageToFrame}
+          onFillImage={fillImageFrame}
+          onFlipImage={flipSelectedImage}
+          onDuplicate={duplicateSelected}
+          onDelete={deleteSelected}
+          onMoveLayer={moveLayer}
+          onRecenter={recenterSelected}
+          onApplyCrop={applyCrop}
+          onCancelCrop={cancelCrop}
+        />
         <div className="canvasScroller" ref={scrollerRef}>
           <EditorStage
-            project={project}
+            project={visibleProject}
             selectedId={selectedId}
             zoom={zoom}
             onSelect={setSelectedId}
@@ -836,6 +1034,10 @@ export default function CarouselEditor() {
               setSelectedId(idToEdit);
               setActiveTool('Text');
             }}
+            onEditImage={startCrop}
+            snapEnabled={snapEnabled}
+            cropModeId={cropModeId}
+            onContextMenu={(idToOpen, x, y) => setContextMenu({ id: idToOpen, x, y })}
           />
         </div>
       </section>
@@ -851,6 +1053,9 @@ export default function CarouselEditor() {
         <button onClick={() => deletePage()}>Delete Page</button>
         <button onClick={() => movePage(-1)}>Move Left</button>
         <button onClick={() => movePage(1)}>Move Right</button>
+        <button className={snapEnabled ? 'activeStatusButton' : ''} onClick={() => setSnapEnabled((enabled) => !enabled)}>
+          Snap {snapEnabled ? 'ON' : 'OFF'}
+        </button>
         <div className="zoom">
           <button onClick={() => setZoom((value) => Math.max(MIN_ZOOM, value - 10))}>−</button>
           <span>{zoom}%</span>
@@ -869,7 +1074,7 @@ export default function CarouselEditor() {
             <div className="previewPages">
               {previewUrls.map((url, index) => (
                 // eslint-disable-next-line @next/next/no-img-element
-                <img key={url} className="previewPage" src={url} alt={`Preview page ${index + 1}`} />
+                <img key={`preview-${index}`} className="previewPage" src={url} alt={`Preview page ${index + 1}`} />
               ))}
             </div>
           </div>
@@ -905,7 +1110,236 @@ export default function CarouselEditor() {
           </div>
         </div>
       )}
+      {contextMenu && selectedObject && (
+        <div
+          className="contextMenu"
+          style={{ left: contextMenu.x, top: contextMenu.y }}
+          onMouseLeave={() => setContextMenu(null)}
+        >
+          <button onClick={duplicateSelected}>Duplicate</button>
+          <button onClick={deleteSelected}>Delete</button>
+          <button onClick={() => selectedObject && moveLayer(selectedObject.id, 'front')}>Bring to Front</button>
+          <button onClick={() => selectedObject && moveLayer(selectedObject.id, 'forward')}>Bring Forward</button>
+          <button onClick={() => selectedObject && moveLayer(selectedObject.id, 'backward')}>Send Backward</button>
+          <button onClick={() => selectedObject && moveLayer(selectedObject.id, 'back')}>Send to Back</button>
+        </div>
+      )}
+      <div className="toast">{message}</div>
     </main>
+  );
+}
+
+function ContextualToolbar({
+  selectedObject,
+  cropMode,
+  uploads,
+  onChangeObject,
+  onReplaceImage,
+  onCrop,
+  onFitImage,
+  onFillImage,
+  onFlipImage,
+  onDuplicate,
+  onDelete,
+  onMoveLayer,
+  onRecenter,
+  onApplyCrop,
+  onCancelCrop,
+}: {
+  selectedObject: EditorObject | null;
+  cropMode: boolean;
+  uploads: UploadedImage[];
+  onChangeObject: (object: EditorObject) => void;
+  onReplaceImage: () => void;
+  onCrop: () => void;
+  onFitImage: () => void;
+  onFillImage: () => void;
+  onFlipImage: (axis: 'x' | 'y') => void;
+  onDuplicate: () => void;
+  onDelete: () => void;
+  onMoveLayer: (id: string, direction: 'front' | 'back' | 'forward' | 'backward') => void;
+  onRecenter: () => void;
+  onApplyCrop: () => void;
+  onCancelCrop: () => void;
+}) {
+  if (!selectedObject) {
+    return <div className="contextToolbar empty">Select an object to edit</div>;
+  }
+
+  if (selectedObject.type === 'image') {
+    const upload = uploads.find((item) => item.id === selectedObject.imageId);
+    return (
+      <div className={cropMode ? 'contextToolbar cropActive' : 'contextToolbar'}>
+        <strong>{cropMode ? 'Crop image' : 'Image'}</strong>
+        {!cropMode ? (
+          <>
+            <button onClick={onReplaceImage}>Replace image</button>
+            <button onClick={onCrop}>Crop</button>
+            <button onClick={onFitImage}>Fit</button>
+            <button onClick={onFillImage}>Fill</button>
+            <button onClick={() => onFlipImage('x')}>Flip H</button>
+            <button onClick={() => onFlipImage('y')}>Flip V</button>
+          </>
+        ) : (
+          <>
+            <label>
+              X
+              <input
+                type="range"
+                min={0}
+                max={Math.max(0, (upload?.width ?? selectedObject.cropWidth) - selectedObject.cropWidth)}
+                value={selectedObject.cropX}
+                onChange={(event) => onChangeObject({ ...selectedObject, cropX: Number(event.target.value) })}
+              />
+            </label>
+            <label>
+              Y
+              <input
+                type="range"
+                min={0}
+                max={Math.max(0, (upload?.height ?? selectedObject.cropHeight) - selectedObject.cropHeight)}
+                value={selectedObject.cropY}
+                onChange={(event) => onChangeObject({ ...selectedObject, cropY: Number(event.target.value) })}
+              />
+            </label>
+            <label>
+              Zoom
+              <input
+                type="range"
+                min={1}
+                max={3}
+                step={0.05}
+                value={(upload?.width ?? selectedObject.cropWidth) / selectedObject.cropWidth}
+                onChange={(event) => {
+                  if (!upload) return;
+                  const zoom = Number(event.target.value);
+                  const frameRatio = selectedObject.width / selectedObject.height;
+                  const cropWidth = upload.width / zoom;
+                  const cropHeight = cropWidth / frameRatio;
+                  onChangeObject({
+                    ...selectedObject,
+                    cropWidth: Math.min(upload.width, cropWidth),
+                    cropHeight: Math.min(upload.height, cropHeight),
+                    cropX: Math.min(selectedObject.cropX, Math.max(0, upload.width - cropWidth)),
+                    cropY: Math.min(selectedObject.cropY, Math.max(0, upload.height - cropHeight)),
+                  });
+                }}
+              />
+            </label>
+            <button className="primaryPanelButton" onClick={onApplyCrop}>Apply</button>
+            <button onClick={onCancelCrop}>Cancel</button>
+          </>
+        )}
+        <label>
+          Opacity
+          <input
+            type="range"
+            min={0.1}
+            max={1}
+            step={0.05}
+            value={selectedObject.opacity}
+            onChange={(event) => onChangeObject({ ...selectedObject, opacity: Number(event.target.value) })}
+          />
+        </label>
+        <button onClick={onDuplicate}>Duplicate</button>
+        <button onClick={onDelete}>Delete</button>
+        <button onClick={() => onMoveLayer(selectedObject.id, 'forward')}>Forward</button>
+        <button onClick={() => onMoveLayer(selectedObject.id, 'backward')}>Backward</button>
+        <button onClick={onRecenter}>Recenter</button>
+      </div>
+    );
+  }
+
+  if (selectedObject.type === 'text') {
+    return (
+      <div className="contextToolbar">
+        <strong>Text</strong>
+        <select value={selectedObject.fontFamily} onChange={(event) => onChangeObject({ ...selectedObject, fontFamily: event.target.value })}>
+          {fonts.map((font) => (
+            <option key={font}>{font}</option>
+          ))}
+        </select>
+        <input
+          className="smallNumber"
+          type="number"
+          min={16}
+          max={220}
+          value={selectedObject.fontSize}
+          onChange={(event) => onChangeObject({ ...selectedObject, fontSize: Number(event.target.value) })}
+        />
+        <button className={selectedObject.bold ? 'active' : ''} onClick={() => onChangeObject({ ...selectedObject, bold: !selectedObject.bold })}>B</button>
+        <button className={selectedObject.italic ? 'active' : ''} onClick={() => onChangeObject({ ...selectedObject, italic: !selectedObject.italic })}>I</button>
+        {(['left', 'center', 'right'] as const).map((align) => (
+          <button key={align} className={selectedObject.align === align ? 'active' : ''} onClick={() => onChangeObject({ ...selectedObject, align })}>
+            {align[0].toUpperCase()}
+          </button>
+        ))}
+        <input type="color" value={selectedObject.fill} onChange={(event) => onChangeObject({ ...selectedObject, fill: event.target.value })} />
+        <label>
+          Opacity
+          <input
+            type="range"
+            min={0.1}
+            max={1}
+            step={0.05}
+            value={selectedObject.opacity}
+            onChange={(event) => onChangeObject({ ...selectedObject, opacity: Number(event.target.value) })}
+          />
+        </label>
+      </div>
+    );
+  }
+
+  if (selectedObject.type === 'shape') {
+    return (
+      <div className="contextToolbar">
+        <strong>Element</strong>
+        {selectedObject.shape !== 'line' && (
+          <label>
+            Fill
+            <input type="color" value={selectedObject.fill === 'transparent' ? '#ffffff' : selectedObject.fill} onChange={(event) => onChangeObject({ ...selectedObject, fill: event.target.value })} />
+          </label>
+        )}
+        <label>
+          Border
+          <input type="color" value={selectedObject.stroke} onChange={(event) => onChangeObject({ ...selectedObject, stroke: event.target.value })} />
+        </label>
+        <label>
+          Width
+          <input
+            className="smallNumber"
+            type="number"
+            min={0}
+            max={40}
+            value={selectedObject.strokeWidth}
+            onChange={(event) => onChangeObject({ ...selectedObject, strokeWidth: Number(event.target.value) })}
+          />
+        </label>
+        <label>
+          Opacity
+          <input
+            type="range"
+            min={0.1}
+            max={1}
+            step={0.05}
+            value={selectedObject.opacity}
+            onChange={(event) => onChangeObject({ ...selectedObject, opacity: Number(event.target.value) })}
+          />
+        </label>
+        <button onClick={onDuplicate}>Duplicate</button>
+        <button onClick={onDelete}>Delete</button>
+        <button onClick={onRecenter}>Recenter</button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="contextToolbar">
+      <strong>Placeholder</strong>
+      <button onClick={onDuplicate}>Duplicate</button>
+      <button onClick={onDelete}>Delete</button>
+      <button onClick={onRecenter}>Recenter</button>
+    </div>
   );
 }
 
@@ -938,7 +1372,7 @@ function PanelContent({
   onInsertImage: (upload: UploadedImage) => void;
   onSetDragUpload: (upload: UploadedImage | null) => void;
   onAddText: (kind?: 'heading' | 'subheading' | 'body') => void;
-  onAddShape: (shape: 'rect' | 'ellipse') => void;
+  onAddShape: (shape: 'rect' | 'roundRect' | 'ellipse' | 'line') => void;
   onApplyTemplate: (template: 'minimal' | 'travel' | 'dump') => void;
   onChangeProject: (project: CarouselProject) => void;
   onChangeObject: (object: EditorObject) => void;
@@ -982,7 +1416,7 @@ function PanelContent({
         )}
         <div className="photoGrid">
           {project.uploads.map((upload) => (
-            <button key={upload.id} onClick={() => onInsertImage(upload)}>
+            <button key={upload.id} title={upload.name} onClick={() => onInsertImage(upload)}>
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
                 src={upload.src}
@@ -1139,7 +1573,9 @@ function PanelContent({
     <div className="panelSection">
       <h2>Elements</h2>
       <button onClick={() => onAddShape('rect')}>Add rectangle</button>
+      <button onClick={() => onAddShape('roundRect')}>Add rounded rectangle</button>
       <button onClick={() => onAddShape('ellipse')}>Add ellipse</button>
+      <button onClick={() => onAddShape('line')}>Add line</button>
       <button onClick={() => onAddText('body')}>Add label text</button>
       <p className="panelNote">
         Page {currentPage + 1} starts at x={currentPage * PAGE_WIDTH}. Objects can move freely across 1080px boundaries.

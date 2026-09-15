@@ -37,6 +37,12 @@ export type BaseObject = {
 export type ImageObject = BaseObject & {
   type: 'image';
   imageId: string;
+  cropX: number;
+  cropY: number;
+  cropWidth: number;
+  cropHeight: number;
+  flipX: boolean;
+  flipY: boolean;
 };
 
 export type TextObject = BaseObject & {
@@ -57,10 +63,11 @@ export type PlaceholderObject = BaseObject & {
 
 export type ShapeObject = BaseObject & {
   type: 'shape';
-  shape: 'rect' | 'ellipse';
+  shape: 'rect' | 'roundRect' | 'ellipse' | 'line';
   fill: string;
   stroke: string;
   strokeWidth: number;
+  radius?: number;
 };
 
 export type EditorObject = ImageObject | TextObject | PlaceholderObject | ShapeObject;

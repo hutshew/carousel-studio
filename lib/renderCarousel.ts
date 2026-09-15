@@ -44,7 +44,25 @@ async function drawObject(
     if (!upload) return;
 
     const image = await loadImage(upload.src);
-    drawRotated(ctx, object, () => ctx.drawImage(image, 0, 0, object.width, object.height));
+    drawRotated(ctx, object, () => {
+      ctx.save();
+      if (object.flipX || object.flipY) {
+        ctx.translate(object.flipX ? object.width : 0, object.flipY ? object.height : 0);
+        ctx.scale(object.flipX ? -1 : 1, object.flipY ? -1 : 1);
+      }
+      ctx.drawImage(
+        image,
+        object.cropX ?? 0,
+        object.cropY ?? 0,
+        object.cropWidth || image.naturalWidth,
+        object.cropHeight || image.naturalHeight,
+        0,
+        0,
+        object.width,
+        object.height,
+      );
+      ctx.restore();
+    });
     return;
   }
 
@@ -71,9 +89,20 @@ async function drawObject(
       ctx.fillStyle = object.fill;
       ctx.strokeStyle = object.stroke;
       ctx.lineWidth = object.strokeWidth;
-      if (object.shape === 'ellipse') {
+      if (object.shape === 'line') {
+        ctx.beginPath();
+        ctx.moveTo(0, object.height / 2);
+        ctx.lineTo(object.width, object.height / 2);
+        ctx.stroke();
+      } else if (object.shape === 'ellipse') {
         ctx.beginPath();
         ctx.ellipse(object.width / 2, object.height / 2, object.width / 2, object.height / 2, 0, 0, Math.PI * 2);
+        ctx.fill();
+        if (object.strokeWidth > 0) ctx.stroke();
+      } else if (object.shape === 'roundRect') {
+        const radius = object.radius ?? 32;
+        ctx.beginPath();
+        ctx.roundRect(0, 0, object.width, object.height, radius);
         ctx.fill();
         if (object.strokeWidth > 0) ctx.stroke();
       } else {
