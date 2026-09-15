@@ -6,7 +6,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "eslint ."
   },
   "dependencies": {
     "@types/node": "^22.0.0",
@@ -19,5 +19,8 @@
     "react-konva": "^19.0.10",
     "typescript": "^5.9.0"
   },
-  "devDependencies": {}
+  "devDependencies": {
+    "eslint": "^9.39.5",
+    "eslint-config-next": "^15.5.25"
+  }
 }
