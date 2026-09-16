@@ -6,6 +6,7 @@ import type Konva from 'konva';
 import {
   CarouselProject,
   EditorObject,
+  ImageFrameObject,
   PAGE_HEIGHT,
   PAGE_WIDTH,
   UploadedImage,
@@ -21,6 +22,7 @@ type EditorStageProps = {
   dragUpload: UploadedImage | null;
   onEditText: (id: string) => void;
   onEditImage: (id: string) => void;
+  onEmptyFrameClick: (id: string) => void;
   snapEnabled: boolean;
   onContextMenu: (id: string, x: number, y: number) => void;
   cropModeId: string | null;
@@ -53,6 +55,141 @@ function useCanvasImage(src?: string) {
   }, [src]);
 
   return image;
+}
+
+function frameCrop(upload: UploadedImage, frame: ImageFrameObject) {
+  if (frame.cropWidth > 0 && frame.cropHeight > 0) {
+    return { x: frame.cropX, y: frame.cropY, width: frame.cropWidth, height: frame.cropHeight };
+  }
+  if (frame.fitMode === 'contain') {
+    return { x: 0, y: 0, width: upload.width, height: upload.height };
+  }
+
+  const frameRatio = frame.width / frame.height;
+  const sourceRatio = upload.width / upload.height;
+  if (sourceRatio > frameRatio) {
+    const width = upload.height * frameRatio;
+    return { x: (upload.width - width) / 2, y: 0, width, height: upload.height };
+  }
+  const height = upload.width / frameRatio;
+  return { x: 0, y: (upload.height - height) / 2, width: upload.width, height };
+}
+
+function EditableImageFrame({
+  object,
+  upload,
+  selected,
+  registerNode,
+  onSelect,
+  onChangeObject,
+  onDragMove,
+  onDragComplete,
+  onContextMenu,
+  onEditImage,
+  onEmptyFrameClick,
+  cropMode,
+}: {
+  object: ImageFrameObject;
+  upload?: UploadedImage;
+  selected: boolean;
+  registerNode: (id: string, node: Konva.Node | null) => void;
+  onSelect: (id: string) => void;
+  onChangeObject: (object: EditorObject) => void;
+  onDragMove: (event: Konva.KonvaEventObject<DragEvent>) => void;
+  onDragComplete: () => void;
+  onContextMenu: (id: string, x: number, y: number) => void;
+  onEditImage: (id: string) => void;
+  onEmptyFrameClick: (id: string) => void;
+  cropMode: boolean;
+}) {
+  const image = useCanvasImage(upload?.src);
+  const crop = upload ? frameCrop(upload, object) : null;
+  const containScale = upload && object.fitMode === 'contain' ? Math.min(object.width / upload.width, object.height / upload.height) : 1;
+  const containWidth = upload ? upload.width * containScale : object.width;
+  const containHeight = upload ? upload.height * containScale : object.height;
+
+  return (
+    <Group
+      ref={(node) => registerNode(object.id, node)}
+      id={object.id}
+      x={object.x}
+      y={object.y}
+      width={object.width}
+      height={object.height}
+      rotation={object.rotation}
+      opacity={object.opacity}
+      draggable
+      clipFunc={(ctx) => {
+        ctx.beginPath();
+        ctx.roundRect(0, 0, object.width, object.height, Math.min(object.cornerRadius, object.width / 2, object.height / 2));
+      }}
+      onClick={() => {
+        onSelect(object.id);
+        if (!object.assetId) onEmptyFrameClick(object.id);
+      }}
+      onTap={() => {
+        onSelect(object.id);
+        if (!object.assetId) onEmptyFrameClick(object.id);
+      }}
+      onDblClick={() => object.assetId && onEditImage(object.id)}
+      onDblTap={() => object.assetId && onEditImage(object.id)}
+      onContextMenu={(event) => {
+        event.evt.preventDefault();
+        onSelect(object.id);
+        onContextMenu(object.id, event.evt.clientX, event.evt.clientY);
+      }}
+      onDragMove={onDragMove}
+      onDragEnd={(event) => {
+        onChangeObject({ ...object, x: event.target.x(), y: event.target.y() });
+        onDragComplete();
+      }}
+      onTransformEnd={(event) => {
+        const node = event.target;
+        const scaleX = node.scaleX();
+        const scaleY = node.scaleY();
+        node.scaleX(1);
+        node.scaleY(1);
+        onChangeObject({
+          ...object,
+          x: node.x(),
+          y: node.y(),
+          width: Math.max(80, object.width * scaleX),
+          height: Math.max(80, object.height * scaleY),
+          rotation: node.rotation(),
+        });
+      }}
+    >
+      <Rect width={object.width} height={object.height} fill="#e5e7eb" cornerRadius={object.cornerRadius} />
+      {image && crop ? (
+        object.fitMode === 'contain' ? (
+          <KonvaImage
+            image={image}
+            x={(object.width - containWidth) / 2}
+            y={(object.height - containHeight) / 2}
+            width={containWidth}
+            height={containHeight}
+            listening={false}
+          />
+        ) : (
+          <KonvaImage image={image} width={object.width} height={object.height} crop={crop} listening={false} />
+        )
+      ) : (
+        <>
+          <Text text="▧" width={object.width} y={object.height / 2 - 78} align="center" fontSize={72} fontFamily="Arial" fontStyle="700" fill="#64748b" listening={false} />
+          <Text text="Add photo" width={object.width} y={object.height / 2 + 16} align="center" fontSize={36} fontFamily="Arial" fontStyle="700" fill="#64748b" listening={false} />
+        </>
+      )}
+      <Rect
+        width={object.width}
+        height={object.height}
+        cornerRadius={object.cornerRadius}
+        stroke={cropMode ? '#f97316' : selected ? '#111827' : '#cbd5e1'}
+        strokeWidth={cropMode ? 5 : selected ? 4 : 2}
+        dash={!object.assetId || cropMode ? [16, 12] : undefined}
+        listening={false}
+      />
+    </Group>
+  );
 }
 
 function EditableImage({
@@ -420,6 +557,7 @@ export default function EditorStage({
   dragUpload,
   onEditText,
   onEditImage,
+  onEmptyFrameClick,
   snapEnabled,
   onContextMenu,
   cropModeId,
@@ -547,6 +685,26 @@ export default function EditorStage({
 
           <Layer>
             {project.objects.map((object) => {
+              if (object.type === 'imageFrame') {
+                return (
+                  <EditableImageFrame
+                    key={object.id}
+                    object={object}
+                    upload={object.assetId ? uploadMap.get(object.assetId) : undefined}
+                    selected={selectedId === object.id}
+                    registerNode={registerNode}
+                    onSelect={onSelect}
+                    onChangeObject={onChangeObject}
+                    onDragMove={(event) => snapNode(object, event.target)}
+                    onDragComplete={() => setGuides([])}
+                    onContextMenu={onContextMenu}
+                    onEditImage={onEditImage}
+                    onEmptyFrameClick={onEmptyFrameClick}
+                    cropMode={cropModeId === object.id}
+                  />
+                );
+              }
+
               if (object.type === 'image') {
                 return (
                 <EditableImage

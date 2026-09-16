@@ -17,17 +17,18 @@ import {
   renderCarouselPages,
   renderProjectThumbnail,
 } from '../../lib/renderCarousel';
+import { carouselTemplates, TemplateDefinition, TemplateId } from '../../templates/carouselTemplates';
 import {
   CarouselProject,
   EditorObject,
   ExportFormat,
   ExportQuality,
+  ImageFrameObject,
   ImageObject,
   MAX_PAGES,
   MIN_PAGES,
   PAGE_HEIGHT,
   PAGE_WIDTH,
-  PlaceholderObject,
   ShapeObject,
   TextObject,
   ToolName,
@@ -72,44 +73,7 @@ function createBlankProject(name = 'My Carousel', pageCount = 3): CarouselProjec
     pageCount,
     background: '#ffffff',
     uploads: [],
-    objects: [
-    {
-      id: 'headline',
-      type: 'text',
-      name: 'Text - Make it seamless',
-      text: 'MAKE IT\nSEAMLESS.',
-      x: 116,
-      y: 310,
-      width: 720,
-      height: 250,
-      rotation: 0,
-      opacity: 1,
-      fontSize: 112,
-      fontFamily: 'Arial',
-      fill: '#111827',
-      bold: true,
-      italic: false,
-      align: 'left',
-    },
-    {
-      id: 'subtitle',
-      type: 'text',
-      name: 'Text - Upload prompt',
-      text: 'Upload photos, drag them across page boundaries, then export clean JPG slices.',
-      x: 124,
-      y: 620,
-      width: 740,
-      height: 92,
-      rotation: 0,
-      opacity: 0.76,
-      fontSize: 34,
-      fontFamily: 'Arial',
-      fill: '#4b5563',
-      bold: false,
-      italic: false,
-      align: 'left',
-    },
-    ],
+    objects: [],
   };
 }
 
@@ -181,30 +145,6 @@ function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
 }
 
-function textObject(input: Omit<TextObject, 'id' | 'type' | 'rotation' | 'opacity' | 'fontFamily' | 'italic' | 'align'> & Partial<Pick<TextObject, 'fontFamily' | 'italic' | 'align' | 'opacity' | 'rotation'>>) {
-  return {
-    id: id('text'),
-    type: 'text' as const,
-    rotation: 0,
-    opacity: 1,
-    fontFamily: 'Arial',
-    italic: false,
-    align: 'left' as const,
-    ...input,
-  };
-}
-
-function placeholderObject(input: Omit<PlaceholderObject, 'id' | 'type' | 'rotation' | 'opacity' | 'label'> & Partial<Pick<PlaceholderObject, 'label' | 'opacity' | 'rotation'>>) {
-  return {
-    id: id('placeholder'),
-    type: 'placeholder' as const,
-    label: 'Add photo',
-    rotation: 0,
-    opacity: 1,
-    ...input,
-  };
-}
-
 function shapeObject(input: Omit<ShapeObject, 'id' | 'type' | 'rotation' | 'opacity'> & Partial<Pick<ShapeObject, 'opacity' | 'rotation'>>) {
   return {
     id: id('shape'),
@@ -213,6 +153,38 @@ function shapeObject(input: Omit<ShapeObject, 'id' | 'type' | 'rotation' | 'opac
     opacity: 1,
     ...input,
   };
+}
+
+function imageFrameObject(input: Omit<ImageFrameObject, 'id' | 'type' | 'rotation' | 'opacity' | 'fitMode' | 'cornerRadius' | 'cropX' | 'cropY' | 'cropWidth' | 'cropHeight'> & Partial<Pick<ImageFrameObject, 'opacity' | 'rotation' | 'fitMode' | 'cornerRadius'>>) {
+  return {
+    id: id('frame'),
+    type: 'imageFrame' as const,
+    rotation: 0,
+    opacity: 1,
+    fitMode: 'cover' as const,
+    cornerRadius: 18,
+    cropX: 0,
+    cropY: 0,
+    cropWidth: 0,
+    cropHeight: 0,
+    ...input,
+  };
+}
+
+function frameCrop(upload: UploadedImage, frame: ImageFrameObject) {
+  const frameRatio = frame.width / frame.height;
+  const sourceRatio = upload.width / upload.height;
+  if (frame.fitMode === 'contain') return { cropX: 0, cropY: 0, cropWidth: upload.width, cropHeight: upload.height };
+  if (sourceRatio > frameRatio) {
+    const cropWidth = upload.height * frameRatio;
+    return { cropX: (upload.width - cropWidth) / 2, cropY: 0, cropWidth, cropHeight: upload.height };
+  }
+  const cropHeight = upload.width / frameRatio;
+  return { cropX: 0, cropY: (upload.height - cropHeight) / 2, cropWidth: upload.width, cropHeight };
+}
+
+function pointInObject(object: EditorObject, x: number, y: number) {
+  return x >= object.x && x <= object.x + object.width && y >= object.y && y <= object.y + object.height;
 }
 
 export default function CarouselEditor() {
@@ -240,8 +212,11 @@ export default function CarouselEditor() {
   const [message, setMessage] = useState('Ready');
   const [snapEnabled, setSnapEnabled] = useState(true);
   const [cropModeId, setCropModeId] = useState<string | null>(null);
-  const [cropDraft, setCropDraft] = useState<ImageObject | null>(null);
+  const [cropDraft, setCropDraft] = useState<ImageObject | ImageFrameObject | null>(null);
   const [contextMenu, setContextMenu] = useState<{ id: string; x: number; y: number } | null>(null);
+  const [pendingTemplate, setPendingTemplate] = useState<TemplateDefinition | null>(null);
+  const [pageThumbs, setPageThumbs] = useState<string[]>([]);
+  const [pageMenu, setPageMenu] = useState<{ page: number; x: number; y: number } | null>(null);
   const [previewUrls, setPreviewUrls] = useState<string[] | null>(null);
   const [exportOpen, setExportOpen] = useState(false);
   const [exportFormat, setExportFormat] = useState<ExportFormat>('jpg');
@@ -396,6 +371,47 @@ export default function CarouselEditor() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [panelCollapsed, project.pageCount]);
 
+  useEffect(() => {
+    const scroller = scrollerRef.current;
+    if (!scroller) return;
+
+    function updateActivePage() {
+      if (!scroller) return;
+      const scale = zoom / 100;
+      const center = (scroller.scrollLeft + scroller.clientWidth / 2) / scale;
+      setCurrentPage(clamp(Math.floor(center / PAGE_WIDTH), 0, project.pageCount - 1));
+    }
+
+    scroller.addEventListener('scroll', updateActivePage, { passive: true });
+    updateActivePage();
+    return () => scroller.removeEventListener('scroll', updateActivePage);
+  }, [project.pageCount, zoom]);
+
+  useEffect(() => {
+    let active = true;
+    const timer = window.setTimeout(async () => {
+      try {
+        const thumbs = await renderCarouselPages(project, 0.65);
+        if (active) setPageThumbs(thumbs);
+      } catch {
+        if (active) setPageThumbs([]);
+      }
+    }, 450);
+
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, [project]);
+
+  function scrollToPage(pageIndex: number) {
+    const scroller = scrollerRef.current;
+    const page = clamp(pageIndex, 0, project.pageCount - 1);
+    setCurrentPage(page);
+    if (!scroller) return;
+    scroller.scrollTo({ left: page * PAGE_WIDTH * (zoom / 100), behavior: 'smooth' });
+  }
+
   function updateObject(object: EditorObject) {
     commit({ ...project, objects: project.objects.map((item) => (item.id === object.id ? object : item)) });
   }
@@ -427,12 +443,45 @@ export default function CarouselEditor() {
     setActiveTool('Photos');
   }
 
+  function selectedFrame() {
+    return selectedObject?.type === 'imageFrame' ? selectedObject : null;
+  }
+
   function selectedImage() {
     return selectedObject?.type === 'image' ? selectedObject : null;
   }
 
-  function selectedUpload(image: ImageObject | null) {
-    return image ? project.uploads.find((upload) => upload.id === image.imageId) ?? null : null;
+  function selectedUpload(image: ImageObject | ImageFrameObject | null) {
+    if (!image) return null;
+    const assetId = image.type === 'image' ? image.imageId : image.assetId;
+    return assetId ? project.uploads.find((upload) => upload.id === assetId) ?? null : null;
+  }
+
+  function fillFrameWithUpload(frame: ImageFrameObject, upload: UploadedImage) {
+    return {
+      ...frame,
+      assetId: upload.id,
+      name: `Frame - ${upload.name}`,
+      ...frameCrop(upload, frame),
+    };
+  }
+
+  function placeUpload(upload: UploadedImage, x?: number, y?: number) {
+    const targetFrame =
+      x !== undefined && y !== undefined
+        ? [...project.objects]
+            .reverse()
+            .find((object): object is ImageFrameObject => object.type === 'imageFrame' && pointInObject(object, x, y))
+        : selectedFrame();
+
+    if (targetFrame) {
+      const nextFrame = fillFrameWithUpload(targetFrame, upload);
+      commit({ ...project, objects: project.objects.map((object) => (object.id === targetFrame.id ? nextFrame : object)) }, targetFrame.id);
+      setMessage(targetFrame.assetId ? 'Frame image replaced' : 'Frame filled');
+      return;
+    }
+
+    insertImage(upload, x, y);
   }
 
   function fillImageCrop(image: ImageObject) {
@@ -459,8 +508,24 @@ export default function CarouselEditor() {
 
   function fitImageToFrame() {
     const image = selectedImage();
-    const upload = selectedUpload(image);
-    if (!image || !upload) return;
+    const frame = selectedFrame();
+    const upload = selectedUpload(image ?? frame);
+    if (!upload) return;
+
+    if (frame) {
+      updateObject({
+        ...frame,
+        fitMode: 'contain',
+        cropX: 0,
+        cropY: 0,
+        cropWidth: upload.width,
+        cropHeight: upload.height,
+      });
+      setMessage('Frame set to contain');
+      return;
+    }
+
+    if (!image) return;
 
     const aspect = upload.height / upload.width;
     updateObject({
@@ -476,6 +541,13 @@ export default function CarouselEditor() {
 
   function fillImageFrame() {
     const image = selectedImage();
+    const frame = selectedFrame();
+    const upload = selectedUpload(frame);
+    if (frame && upload) {
+      updateObject({ ...frame, fitMode: 'cover', ...frameCrop(upload, frame) });
+      setMessage('Frame filled');
+      return;
+    }
     if (!image) return;
     updateObject(fillImageCrop(image));
     setMessage('Image filled frame');
@@ -487,16 +559,26 @@ export default function CarouselEditor() {
     updateObject({ ...image, flipX: axis === 'x' ? !image.flipX : image.flipX, flipY: axis === 'y' ? !image.flipY : image.flipY });
   }
 
+  function removeFrameImage() {
+    const frame = selectedFrame();
+    if (!frame) return;
+    updateObject({ ...frame, assetId: undefined, cropX: 0, cropY: 0, cropWidth: 0, cropHeight: 0 });
+    setMessage('Frame image removed');
+  }
+
   function startCrop(idToCrop = selectedId) {
-    const image = project.objects.find((object): object is ImageObject => object.id === idToCrop && object.type === 'image');
+    const image = project.objects.find(
+      (object): object is ImageObject | ImageFrameObject =>
+        object.id === idToCrop && (object.type === 'image' || (object.type === 'imageFrame' && Boolean(object.assetId))),
+    );
     if (!image) return;
     setCropModeId(image.id);
-    setCropDraft(cloneProject({ ...project, objects: [image] }).objects[0] as ImageObject);
+    setCropDraft(cloneProject({ ...project, objects: [image] }).objects[0] as ImageObject | ImageFrameObject);
     setSelectedId(image.id);
     setMessage('Crop mode');
   }
 
-  function updateCropDraft(next: ImageObject) {
+  function updateCropDraft(next: ImageObject | ImageFrameObject) {
     setCropDraft(next);
   }
 
@@ -518,7 +600,8 @@ export default function CarouselEditor() {
     const file = event.target.files?.[0];
     event.target.value = '';
     const image = selectedImage();
-    if (!file || !image) return;
+    const frame = selectedFrame();
+    if (!file || (!image && !frame)) return;
 
     try {
       if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
@@ -528,6 +611,19 @@ export default function CarouselEditor() {
       const src = await fileToDataUrl(file);
       const size = await getImageSize(src);
       const upload = { id: id('asset'), name: file.name, src, blob: file, mimeType: file.type, ...size };
+      if (frame) {
+        commit({
+          ...project,
+          uploads: [...project.uploads, upload],
+          objects: project.objects.map((object) =>
+            object.id === frame.id ? fillFrameWithUpload(frame, upload) : object,
+          ),
+        }, frame.id);
+        setMessage(frame.assetId ? 'Frame image replaced' : 'Frame filled');
+        return;
+      }
+
+      if (!image) return;
       commit({
         ...project,
         uploads: [...project.uploads, upload],
@@ -728,217 +824,57 @@ export default function CarouselEditor() {
     setCurrentPage(target);
   }
 
-  function applyTemplate(template: 'minimal' | 'travel' | 'dump') {
-    const p1 = 0;
-    const p2 = PAGE_WIDTH;
-    const p3 = PAGE_WIDTH * 2;
-    const objects: EditorObject[] =
-      template === 'minimal'
-        ? [
-            textObject({
-              name: 'Text - Minimal title',
-              text: 'A CLEAN\nIDEA',
-              x: p1 + 130,
-              y: 390,
-              width: 760,
-              height: 310,
-              fontSize: 132,
-              fill: '#111827',
-              bold: true,
-            }),
-            textObject({
-              name: 'Text - Minimal subtitle',
-              text: 'Whitespace, rhythm, and one strong story.',
-              x: p1 + 138,
-              y: 760,
-              width: 650,
-              height: 70,
-              fontSize: 34,
-              fill: '#64748b',
-              bold: false,
-            }),
-            placeholderObject({
-              name: 'Photo placeholder - Minimal feature',
-              x: p2 + 150,
-              y: 210,
-              width: 780,
-              height: 760,
-            }),
-            textObject({
-              name: 'Text - Minimal page note',
-              text: 'Drop in a hero image or product moment.',
-              x: p2 + 170,
-              y: 1035,
-              width: 720,
-              height: 58,
-              fontSize: 30,
-              fill: '#475569',
-              bold: false,
-              align: 'center',
-            }),
-            textObject({
-              name: 'Text - Minimal close',
-              text: 'SAVE THIS\nFOR LATER',
-              x: p3 + 150,
-              y: 455,
-              width: 820,
-              height: 230,
-              fontSize: 96,
-              fill: '#111827',
-              bold: true,
-              align: 'center',
-            }),
-            textObject({
-              name: 'Text - Minimal CTA',
-              text: 'Export clean 1080 × 1350 JPG pages.',
-              x: p3 + 210,
-              y: 740,
-              width: 700,
-              height: 58,
-              fontSize: 28,
-              fill: '#64748b',
-              bold: false,
-              align: 'center',
-            }),
-          ]
-        : template === 'travel'
-          ? [
-              textObject({
-                name: 'Text - Travel',
-                text: 'TRAVEL',
-                x: p1 + 118,
-                y: 250,
-                width: 800,
-                height: 160,
-                fontSize: 138,
-                fill: '#0f172a',
-                bold: true,
-              }),
-              textObject({
-                name: 'Text - Travel story',
-                text: 'CHIANG MAI',
-                x: p1 + 126,
-                y: 430,
-                width: 840,
-                height: 120,
-                fontSize: 86,
-                fill: '#0f766e',
-                bold: true,
-              }),
-              textObject({
-                name: 'Text - Travel note',
-                text: 'temples, coffee, mountain light',
-                x: p1 + 132,
-                y: 565,
-                width: 680,
-                height: 70,
-                fontSize: 34,
-                fill: '#334155',
-                bold: false,
-              }),
-              placeholderObject({
-                name: 'Photo placeholder - Cross-page travel',
-                x: p1 + 910,
-                y: 235,
-                width: 940,
-                height: 650,
-              }),
-              textObject({
-                name: 'Text - Location title',
-                text: 'OLD CITY\nWALK',
-                x: p2 + 160,
-                y: 935,
-                width: 720,
-                height: 160,
-                fontSize: 70,
-                fill: '#0f172a',
-                bold: true,
-                align: 'center',
-              }),
-              placeholderObject({
-                name: 'Photo placeholder - Travel finale',
-                x: p3 + 120,
-                y: 180,
-                width: 840,
-                height: 820,
-              }),
-              textObject({
-                name: 'Text - Travel final note',
-                text: 'A slow weekend guide for the north.',
-                x: p3 + 150,
-                y: 1085,
-                width: 780,
-                height: 60,
-                fontSize: 30,
-                fill: '#475569',
-                bold: false,
-                align: 'center',
-              }),
-            ]
-          : [
-              textObject({
-                name: 'Text - Photo dump',
-                text: 'PHOTO\nDUMP\n01',
-                x: p1 + 130,
-                y: 260,
-                width: 900,
-                height: 470,
-                fontSize: 126,
-                fill: '#111827',
-                bold: true,
-              }),
-              textObject({
-                name: 'Text - Photo dump date',
-                text: 'moments worth sliding through',
-                x: p1 + 140,
-                y: 800,
-                width: 650,
-                height: 70,
-                fontSize: 32,
-                fill: '#4b5563',
-                bold: false,
-              }),
-              placeholderObject({
-                name: 'Photo placeholder - Dump center',
-                x: p2 + 120,
-                y: 160,
-                width: 840,
-                height: 900,
-              }),
-              placeholderObject({
-                name: 'Photo placeholder - Dump finale',
-                x: p3 + 130,
-                y: 210,
-                width: 660,
-                height: 760,
-              }),
-              textObject({
-                name: 'Text - Dump caption',
-                text: 'the little scenes that made the week',
-                x: p3 + 160,
-                y: 1035,
-                width: 760,
-                height: 76,
-                fontSize: 34,
-                fill: '#334155',
-                bold: false,
-              }),
-              shapeObject({
-                name: 'Shape - Accent block',
-                shape: 'rect',
-                x: p3 + 810,
-                y: 210,
-                width: 110,
-                height: 760,
-                fill: '#111827',
-                stroke: '#111827',
-                strokeWidth: 0,
-              }),
-            ];
+  function applyTemplate(templateId: TemplateId) {
+    const template = carouselTemplates.find((item) => item.id === templateId);
+    if (!template) return;
+    setPendingTemplate(template);
+  }
 
-    commit({ ...project, pageCount: Math.max(3, project.pageCount), objects }, objects[0]?.id ?? selectedId);
+  function confirmApplyTemplate() {
+    if (!pendingTemplate) return;
+    const objects = pendingTemplate.objects.map((object) => ({
+      ...cloneProject({ ...project, objects: [object] }).objects[0],
+      id: id(object.type),
+    }));
+    commit({ ...project, pageCount: pendingTemplate.pageCount, background: pendingTemplate.background, objects }, objects[0]?.id ?? null);
     setCurrentPage(0);
+    scrollToPage(0);
+    setPendingTemplate(null);
     setActiveTool('Layers');
+    setMessage(pendingTemplate.name + ' template applied');
+  }
+
+  function addFrame() {
+    const frame = imageFrameObject({
+      name: 'Frame - Add photo',
+      x: currentPage * PAGE_WIDTH + 190,
+      y: 255,
+      width: 700,
+      height: 620,
+      cornerRadius: 26,
+    });
+    commit({ ...project, objects: [...project.objects, frame] }, frame.id);
+    setActiveTool('Elements');
+  }
+
+  function duplicatePage(pageIndex = currentPage) {
+    if (project.pageCount >= MAX_PAGES) return;
+    const start = pageIndex * PAGE_WIDTH;
+    const end = start + PAGE_WIDTH;
+    const insertAt = end;
+    const pageObjects = project.objects
+      .filter((object) => object.x + object.width > start && object.x < end)
+      .map((object) => ({
+        ...cloneProject({ ...project, objects: [object] }).objects[0],
+        id: id(object.type),
+        name: object.name + ' copy',
+        x: object.x - start + insertAt,
+      }));
+    const shifted = project.objects.map((object) => (object.x >= end ? { ...object, x: object.x + PAGE_WIDTH } : object));
+    commit({ ...project, pageCount: project.pageCount + 1, objects: [...shifted, ...pageObjects] }, pageObjects[0]?.id ?? null);
+    setCurrentPage(pageIndex + 1);
+    window.setTimeout(() => scrollToPage(pageIndex + 1), 0);
+    setPageMenu(null);
   }
 
   async function openPreview() {
@@ -1237,10 +1173,11 @@ export default function CarouselEditor() {
           selectedObject={selectedObject}
           currentPage={currentPage}
           onUpload={() => inputRef.current?.click()}
-          onInsertImage={insertImage}
+          onInsertImage={placeUpload}
           onSetDragUpload={setDragUpload}
           onAddText={addText}
           onAddShape={addShape}
+          onAddFrame={addFrame}
           onApplyTemplate={applyTemplate}
           onChangeProject={(next) => commit(next)}
           onChangeObject={updateObject}
@@ -1265,18 +1202,21 @@ export default function CarouselEditor() {
             <b>Instagram Portrait</b>
             <span className="muted">1080 × 1350 per page · continuous canvas</span>
           </div>
-          <div className="badge">{project.pageCount} pages</div>
+          <button className="badge pageBadge" onClick={() => scrollToPage(currentPage)}>
+            Page {currentPage + 1} of {project.pageCount}
+          </button>
         </div>
         <ContextualToolbar
           selectedObject={cropDraft ?? selectedObject}
           cropMode={Boolean(cropModeId)}
           uploads={project.uploads}
-          onChangeObject={(object) => (cropModeId && object.type === 'image' ? updateCropDraft(object) : updateObject(object))}
+          onChangeObject={(object) => (cropModeId && (object.type === 'image' || object.type === 'imageFrame') ? updateCropDraft(object) : updateObject(object))}
           onReplaceImage={() => replaceInputRef.current?.click()}
           onCrop={() => startCrop()}
           onFitImage={fitImageToFrame}
           onFillImage={fillImageFrame}
           onFlipImage={flipSelectedImage}
+          onRemoveFrameImage={removeFrameImage}
           onDuplicate={duplicateSelected}
           onDelete={deleteSelected}
           onMoveLayer={moveLayer}
@@ -1285,23 +1225,59 @@ export default function CarouselEditor() {
           onCancelCrop={cancelCrop}
         />
         <div className="canvasScroller" ref={scrollerRef}>
+          {!project.objects.length && (
+            <div className="emptyState">
+              <b>Start your carousel</b>
+              <span>Choose a visual template or upload photos to begin.</span>
+              <div>
+                <button onClick={() => setActiveTool('Templates')}>Choose Template</button>
+                <button onClick={() => inputRef.current?.click()}>Upload Photos</button>
+              </div>
+            </div>
+          )}
           <EditorStage
             project={visibleProject}
             selectedId={selectedId}
             zoom={zoom}
             onSelect={setSelectedId}
             onChangeObject={updateObject}
-            onDropImage={(upload, x, y) => insertImage(upload, x, y)}
+            onDropImage={(upload, x, y) => placeUpload(upload, x, y)}
             dragUpload={dragUpload}
             onEditText={(idToEdit) => {
               setSelectedId(idToEdit);
               setActiveTool('Text');
             }}
             onEditImage={startCrop}
+            onEmptyFrameClick={(idToFill) => {
+              setSelectedId(idToFill);
+              replaceInputRef.current?.click();
+            }}
             snapEnabled={snapEnabled}
             cropModeId={cropModeId}
             onContextMenu={(idToOpen, x, y) => setContextMenu({ id: idToOpen, x, y })}
           />
+        </div>
+        <div className="pageStrip">
+          {Array.from({ length: project.pageCount }).map((_, index) => (
+            <button
+              key={`page-thumb-${index}`}
+              className={currentPage === index ? 'pageThumb active' : 'pageThumb'}
+              onClick={() => scrollToPage(index)}
+              onContextMenu={(event) => {
+                event.preventDefault();
+                setPageMenu({ page: index, x: event.clientX, y: event.clientY });
+              }}
+            >
+              {pageThumbs[index] ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={pageThumbs[index]} alt="" />
+              ) : (
+                <span>{String(index + 1).padStart(2, '0')}</span>
+              )}
+              <small>{String(index + 1).padStart(2, '0')}</small>
+            </button>
+          ))}
+          <button className="pageThumb add" onClick={addPage}>+ Add Page</button>
         </div>
       </section>
 
@@ -1443,6 +1419,32 @@ export default function CarouselEditor() {
           </div>
         </div>
       )}
+      {pendingTemplate && (
+        <div className="modal" onClick={() => setPendingTemplate(null)}>
+          <div className="templateApplyCard" onClick={(event) => event.stopPropagation()}>
+            <div className="previewHead">
+              <b>Apply Template?</b>
+              <button onClick={() => setPendingTemplate(null)}>×</button>
+            </div>
+            <TemplatePreview template={pendingTemplate} />
+            <p className="panelNote">This will replace the current design with {pendingTemplate.pageCount} pages.</p>
+            <div className="modalActions">
+              <button onClick={() => setPendingTemplate(null)}>Cancel</button>
+              <button className="exportButton" onClick={confirmApplyTemplate}>Apply</button>
+            </div>
+          </div>
+        </div>
+      )}
+      {pageMenu && (
+        <div
+          className="contextMenu"
+          style={{ left: pageMenu.x, top: pageMenu.y }}
+          onMouseLeave={() => setPageMenu(null)}
+        >
+          <button onClick={() => duplicatePage(pageMenu.page)}>Duplicate Page</button>
+          <button onClick={() => deletePage(pageMenu.page)}>Delete Page</button>
+        </div>
+      )}
       {contextMenu && selectedObject && (
         <div
           className="contextMenu"
@@ -1472,6 +1474,7 @@ function ContextualToolbar({
   onFitImage,
   onFillImage,
   onFlipImage,
+  onRemoveFrameImage,
   onDuplicate,
   onDelete,
   onMoveLayer,
@@ -1488,6 +1491,7 @@ function ContextualToolbar({
   onFitImage: () => void;
   onFillImage: () => void;
   onFlipImage: (axis: 'x' | 'y') => void;
+  onRemoveFrameImage: () => void;
   onDuplicate: () => void;
   onDelete: () => void;
   onMoveLayer: (id: string, direction: 'front' | 'back' | 'forward' | 'backward') => void;
@@ -1497,6 +1501,97 @@ function ContextualToolbar({
 }) {
   if (!selectedObject) {
     return <div className="contextToolbar empty">Select an object to edit</div>;
+  }
+
+  if (selectedObject.type === 'imageFrame') {
+    const upload = selectedObject.assetId ? uploads.find((item) => item.id === selectedObject.assetId) : null;
+    return (
+      <div className={cropMode ? 'contextToolbar cropActive' : 'contextToolbar'}>
+        <strong>{cropMode ? 'Crop frame' : 'Image Frame'}</strong>
+        {!cropMode ? (
+          <>
+            <button onClick={onReplaceImage}>{upload ? 'Replace' : 'Add photo'}</button>
+            <button onClick={onCrop} disabled={!upload}>Crop</button>
+            <button onClick={onFitImage} disabled={!upload}>Fit</button>
+            <button onClick={onFillImage} disabled={!upload}>Fill</button>
+            <button onClick={onRemoveFrameImage} disabled={!upload}>Remove image</button>
+          </>
+        ) : (
+          <>
+            <label>
+              X
+              <input
+                type="range"
+                min={0}
+                max={Math.max(0, (upload?.width ?? selectedObject.cropWidth) - selectedObject.cropWidth)}
+                value={selectedObject.cropX}
+                onChange={(event) => onChangeObject({ ...selectedObject, cropX: Number(event.target.value) })}
+              />
+            </label>
+            <label>
+              Y
+              <input
+                type="range"
+                min={0}
+                max={Math.max(0, (upload?.height ?? selectedObject.cropHeight) - selectedObject.cropHeight)}
+                value={selectedObject.cropY}
+                onChange={(event) => onChangeObject({ ...selectedObject, cropY: Number(event.target.value) })}
+              />
+            </label>
+            <label>
+              Zoom
+              <input
+                type="range"
+                min={1}
+                max={3}
+                step={0.05}
+                value={upload && selectedObject.cropWidth ? upload.width / selectedObject.cropWidth : 1}
+                onChange={(event) => {
+                  if (!upload) return;
+                  const zoom = Number(event.target.value);
+                  const frameRatio = selectedObject.width / selectedObject.height;
+                  const cropWidth = upload.width / zoom;
+                  const cropHeight = cropWidth / frameRatio;
+                  onChangeObject({
+                    ...selectedObject,
+                    fitMode: 'cover',
+                    cropWidth: Math.min(upload.width, cropWidth),
+                    cropHeight: Math.min(upload.height, cropHeight),
+                    cropX: Math.min(selectedObject.cropX, Math.max(0, upload.width - cropWidth)),
+                    cropY: Math.min(selectedObject.cropY, Math.max(0, upload.height - cropHeight)),
+                  });
+                }}
+              />
+            </label>
+            <button className="primaryPanelButton" onClick={onApplyCrop}>Apply</button>
+            <button onClick={onCancelCrop}>Cancel</button>
+          </>
+        )}
+        <label>
+          Radius
+          <input
+            type="range"
+            min={0}
+            max={120}
+            value={selectedObject.cornerRadius}
+            onChange={(event) => onChangeObject({ ...selectedObject, cornerRadius: Number(event.target.value) })}
+          />
+        </label>
+        <label>
+          Opacity
+          <input
+            type="range"
+            min={0.1}
+            max={1}
+            step={0.05}
+            value={selectedObject.opacity}
+            onChange={(event) => onChangeObject({ ...selectedObject, opacity: Number(event.target.value) })}
+          />
+        </label>
+        <button onClick={onDuplicate}>Duplicate</button>
+        <button onClick={onDelete}>Delete</button>
+      </div>
+    );
   }
 
   if (selectedObject.type === 'image') {
@@ -1676,6 +1771,36 @@ function ContextualToolbar({
   );
 }
 
+function TemplateThumb({ variant }: { variant: TemplateDefinition['thumbnail'] }) {
+  return (
+    <div className={`templateThumb ${variant}`}>
+      <i />
+      <i />
+      <i />
+      <strong />
+    </div>
+  );
+}
+
+function TemplatePreview({ template }: { template: TemplateDefinition }) {
+  return (
+    <div className="templatePreview">
+      <div>
+        <b>{template.name}</b>
+        <span>{template.description} · {template.pageCount} pages</span>
+      </div>
+      <div className="templateMiniPages">
+        {Array.from({ length: template.pageCount }).map((_, index) => (
+          <div key={`${template.id}-preview-${index}`}>
+            <TemplateThumb variant={template.thumbnail} />
+            <small>{String(index + 1).padStart(2, '0')}</small>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function PanelContent({
   activeTool,
   project,
@@ -1686,6 +1811,7 @@ function PanelContent({
   onSetDragUpload,
   onAddText,
   onAddShape,
+  onAddFrame,
   onApplyTemplate,
   onChangeProject,
   onChangeObject,
@@ -1711,7 +1837,8 @@ function PanelContent({
   onSetDragUpload: (upload: UploadedImage | null) => void;
   onAddText: (kind?: 'heading' | 'subheading' | 'body') => void;
   onAddShape: (shape: 'rect' | 'roundRect' | 'ellipse' | 'line') => void;
-  onApplyTemplate: (template: 'minimal' | 'travel' | 'dump') => void;
+  onAddFrame: () => void;
+  onApplyTemplate: (template: TemplateId) => void;
   onChangeProject: (project: CarouselProject) => void;
   onChangeObject: (object: EditorObject) => void;
   onSelect: (id: string | null) => void;
@@ -1731,18 +1858,15 @@ function PanelContent({
     return (
       <div className="panelSection">
         <h2>Templates</h2>
-        <button className="templateCard" onClick={() => onApplyTemplate('minimal')}>
-          <b>Minimal</b>
-          <span>Whitespace, hero text, image block, final CTA.</span>
-        </button>
-        <button className="templateCard" onClick={() => onApplyTemplate('travel')}>
-          <b>Travel Story</b>
-          <span>Cross-page image placeholder with destination notes.</span>
-        </button>
-        <button className="templateCard" onClick={() => onApplyTemplate('dump')}>
-          <b>Photo Dump</b>
-          <span>Large photo spaces with a bold opening page.</span>
-        </button>
+        <div className="templateGrid">
+          {carouselTemplates.map((template) => (
+            <button key={template.id} className="templateVisualCard" onClick={() => onApplyTemplate(template.id)}>
+              <TemplateThumb variant={template.thumbnail} />
+              <b>{template.name}</b>
+              <span>{template.description}</span>
+            </button>
+          ))}
+        </div>
       </div>
     );
   }
@@ -1956,6 +2080,7 @@ function PanelContent({
       <button onClick={() => onAddShape('roundRect')}>Add rounded rectangle</button>
       <button onClick={() => onAddShape('ellipse')}>Add ellipse</button>
       <button onClick={() => onAddShape('line')}>Add line</button>
+      <button className="primaryPanelButton" onClick={onAddFrame}>Add image frame</button>
       <button onClick={() => onAddText('body')}>Add label text</button>
       <p className="panelNote">
         Page {currentPage + 1} starts at x={currentPage * PAGE_WIDTH}. Objects can move freely across 1080px boundaries.

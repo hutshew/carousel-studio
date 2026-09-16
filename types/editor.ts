@@ -47,6 +47,17 @@ export type ImageObject = BaseObject & {
   flipY: boolean;
 };
 
+export type ImageFrameObject = BaseObject & {
+  type: 'imageFrame';
+  assetId?: string;
+  fitMode: 'cover' | 'contain';
+  cornerRadius: number;
+  cropX: number;
+  cropY: number;
+  cropWidth: number;
+  cropHeight: number;
+};
+
 export type TextObject = BaseObject & {
   type: 'text';
   text: string;
@@ -72,7 +83,7 @@ export type ShapeObject = BaseObject & {
   radius?: number;
 };
 
-export type EditorObject = ImageObject | TextObject | PlaceholderObject | ShapeObject;
+export type EditorObject = ImageObject | ImageFrameObject | TextObject | PlaceholderObject | ShapeObject;
 
 export type CarouselProject = {
   id: string;

@@ -35,6 +35,31 @@ function drawRotated(ctx: CanvasRenderingContext2D, object: EditorObject, draw: 
   ctx.restore();
 }
 
+function roundedPath(ctx: CanvasRenderingContext2D, width: number, height: number, radius: number) {
+  const safeRadius = Math.min(radius, width / 2, height / 2);
+  ctx.beginPath();
+  ctx.roundRect(0, 0, width, height, safeRadius);
+}
+
+function coverCrop(sourceWidth: number, sourceHeight: number, frameWidth: number, frameHeight: number) {
+  const frameRatio = frameWidth / frameHeight;
+  const sourceRatio = sourceWidth / sourceHeight;
+  let cropWidth = sourceWidth;
+  let cropHeight = sourceHeight;
+  let cropX = 0;
+  let cropY = 0;
+
+  if (sourceRatio > frameRatio) {
+    cropWidth = sourceHeight * frameRatio;
+    cropX = (sourceWidth - cropWidth) / 2;
+  } else {
+    cropHeight = sourceWidth / frameRatio;
+    cropY = (sourceHeight - cropHeight) / 2;
+  }
+
+  return { cropX, cropY, cropWidth, cropHeight };
+}
+
 async function drawObject(
   ctx: CanvasRenderingContext2D,
   object: EditorObject,
@@ -63,6 +88,65 @@ async function drawObject(
         object.height,
       );
       ctx.restore();
+    });
+    return;
+  }
+
+  if (object.type === 'imageFrame') {
+    const upload = object.assetId ? uploads.find((item) => item.id === object.assetId) : null;
+    drawRotated(ctx, object, () => {
+      roundedPath(ctx, object.width, object.height, object.cornerRadius);
+      ctx.fillStyle = '#e5e7eb';
+      ctx.fill();
+      ctx.save();
+      roundedPath(ctx, object.width, object.height, object.cornerRadius);
+      ctx.clip();
+      ctx.restore();
+
+      if (!upload) {
+        ctx.strokeStyle = '#cbd5e1';
+        ctx.lineWidth = 4;
+        roundedPath(ctx, object.width, object.height, object.cornerRadius);
+        ctx.stroke();
+        ctx.fillStyle = '#64748b';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.font = '700 54px Arial';
+        ctx.fillText('▧', object.width / 2, object.height / 2 - 36);
+        ctx.font = '700 34px Arial';
+        ctx.fillText('Add photo', object.width / 2, object.height / 2 + 36, object.width - 80);
+      }
+    });
+
+    if (!upload) return;
+
+    const image = await loadImage(upload.src);
+    drawRotated(ctx, object, () => {
+      roundedPath(ctx, object.width, object.height, object.cornerRadius);
+      ctx.clip();
+
+      if (object.fitMode === 'contain') {
+        const scale = Math.min(object.width / image.naturalWidth, object.height / image.naturalHeight);
+        const drawWidth = image.naturalWidth * scale;
+        const drawHeight = image.naturalHeight * scale;
+        ctx.drawImage(image, (object.width - drawWidth) / 2, (object.height - drawHeight) / 2, drawWidth, drawHeight);
+      } else {
+        const crop =
+          object.cropWidth > 0 && object.cropHeight > 0
+            ? object
+            : coverCrop(image.naturalWidth, image.naturalHeight, object.width, object.height);
+        ctx.drawImage(
+          image,
+          crop.cropX,
+          crop.cropY,
+          crop.cropWidth,
+          crop.cropHeight,
+          0,
+          0,
+          object.width,
+          object.height,
+        );
+      }
     });
     return;
   }
