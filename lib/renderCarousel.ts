@@ -9,6 +9,31 @@ import {
 
 const imageCache = new Map<string, Promise<HTMLImageElement>>();
 
+function canvasFontFamily(fontFamily: string) {
+  return fontFamily.includes(' ') ? `"${fontFamily.replace(/"/g, '\\"')}"` : fontFamily;
+}
+
+async function waitForProjectFonts(project: CarouselProject) {
+  if (typeof document === 'undefined' || !('fonts' in document)) return;
+
+  const textFonts = Array.from(
+    new Set(
+      project.objects
+        .filter((object) => object.type === 'text')
+        .map((object) => object.fontFamily),
+    ),
+  );
+  if (!textFonts.length) return;
+
+  await Promise.all(
+    textFonts.flatMap((fontFamily) => {
+      const family = canvasFontFamily(fontFamily);
+      return [`400 32px ${family}`, `700 32px ${family}`].map((font) => document.fonts.load(font));
+    }),
+  );
+  await document.fonts.ready;
+}
+
 function loadImage(src: string) {
   if (!imageCache.has(src)) {
     imageCache.set(
@@ -204,7 +229,7 @@ async function drawObject(
     ctx.textBaseline = 'top';
     ctx.font = `${object.italic ? 'italic ' : ''}${object.bold ? '700 ' : '400 '}${
       object.fontSize
-    }px ${object.fontFamily}`;
+    }px ${canvasFontFamily(object.fontFamily)}`;
 
     const lines = object.text.split('\n');
     const lineHeight = object.fontSize * 1.2;
@@ -222,6 +247,8 @@ export async function renderCarouselPages(
   selectedPage?: number,
   format: ExportFormat = 'jpg',
 ) {
+  await waitForProjectFonts(project);
+
   const pages = selectedPage === undefined ? project.pageCount : 1;
   const start = selectedPage ?? 0;
   const urls: string[] = [];

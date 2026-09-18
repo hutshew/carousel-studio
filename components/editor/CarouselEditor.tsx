@@ -59,6 +59,7 @@ const fonts = [
   'Verdana',
   'Trebuchet MS',
 ];
+const DEFAULT_TEXT_FONT = 'Noto Sans Thai';
 const presets = ['#ffffff', '#f4f1ea', '#111827', '#f97316', '#0f766e', '#2563eb', '#e11d48'];
 const MIN_ZOOM = 20;
 const MAX_ZOOM = 100;
@@ -413,7 +414,17 @@ export default function CarouselEditor() {
   }
 
   function updateObject(object: EditorObject) {
+    const previous = project.objects.find((item) => item.id === object.id);
     commit({ ...project, objects: project.objects.map((item) => (item.id === object.id ? object : item)) });
+    if (previous?.type === 'text' && object.type === 'text' && previous.fontFamily !== object.fontFamily) {
+      setMessage(`Font changed to ${object.fontFamily}`);
+    }
+  }
+
+  function selectObject(idToSelect: string | null) {
+    setSelectedId(idToSelect);
+    const object = project.objects.find((item) => item.id === idToSelect);
+    if (object?.type === 'text') setActiveTool('Text');
   }
 
   function insertImage(upload: UploadedImage, x = currentPage * PAGE_WIDTH + 170, y = 220) {
@@ -667,7 +678,7 @@ export default function CarouselEditor() {
       rotation: 0,
       opacity: 1,
       fontSize: settings.fontSize,
-      fontFamily: 'Arial',
+      fontFamily: DEFAULT_TEXT_FONT,
       fill: '#111827',
       bold: settings.bold,
       italic: false,
@@ -1181,7 +1192,7 @@ export default function CarouselEditor() {
           onApplyTemplate={applyTemplate}
           onChangeProject={(next) => commit(next)}
           onChangeObject={updateObject}
-          onSelect={setSelectedId}
+          onSelect={selectObject}
           onDuplicate={duplicateSelected}
           onDelete={deleteSelected}
           onMoveLayer={moveLayer}
@@ -1239,7 +1250,7 @@ export default function CarouselEditor() {
             project={visibleProject}
             selectedId={selectedId}
             zoom={zoom}
-            onSelect={setSelectedId}
+            onSelect={selectObject}
             onChangeObject={updateObject}
             onDropImage={(upload, x, y) => placeUpload(upload, x, y)}
             dragUpload={dragUpload}

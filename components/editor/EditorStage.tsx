@@ -33,6 +33,10 @@ type Guide = {
   position: number;
 };
 
+function canvasFontFamily(fontFamily: string) {
+  return fontFamily.includes(' ') ? `"${fontFamily.replace(/"/g, '\\"')}"` : fontFamily;
+}
+
 function useCanvasImage(src?: string) {
   const [image, setImage] = useState<HTMLImageElement | null>(null);
 
@@ -572,6 +576,37 @@ export default function EditorStage({
   const uploadMap = useMemo(() => {
     return new Map(project.uploads.map((upload) => [upload.id, upload]));
   }, [project.uploads]);
+
+  useEffect(() => {
+    if (typeof document === 'undefined' || !('fonts' in document)) return;
+
+    let active = true;
+    const textFonts = Array.from(
+      new Set(
+        project.objects
+          .filter((object) => object.type === 'text')
+          .map((object) => object.fontFamily),
+      ),
+    );
+    if (!textFonts.length) return;
+
+    async function loadFonts() {
+      await Promise.all(
+        textFonts.flatMap((fontFamily) => {
+          const family = canvasFontFamily(fontFamily);
+          return [`400 32px ${family}`, `700 32px ${family}`].map((font) => document.fonts.load(font));
+        }),
+      );
+      await document.fonts.ready;
+      if (active) stageRef.current?.batchDraw();
+    }
+
+    void loadFonts();
+
+    return () => {
+      active = false;
+    };
+  }, [project.objects]);
 
   useEffect(() => {
     const transformer = transformerRef.current;
