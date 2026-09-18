@@ -4,6 +4,255 @@
   box-sizing: border-box;
 }
 
+.studioV2 {
+  height: 100vh;
+  display: grid;
+  grid-template-columns: 320px minmax(0, 1fr);
+  background: #eef2f5;
+  color: #111827;
+}
+
+.v2Sidebar {
+  min-width: 0;
+  padding: 18px;
+  background: #ffffff;
+  border-right: 1px solid #dde3ea;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow: auto;
+}
+
+.v2Brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.v2Brand span {
+  width: 42px;
+  height: 42px;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  background: #111827;
+  color: #fff;
+  font-weight: 800;
+}
+
+.v2Brand div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.v2Brand small,
+.v2Topbar span,
+.v2Status {
+  color: #64748b;
+  font-size: 12px;
+}
+
+.v2Sidebar button,
+.v2Topbar button,
+.v2Sidebar input,
+.v2Sidebar select,
+.v2Sidebar textarea {
+  border: 1px solid #d7dde5;
+  border-radius: 8px;
+  background: #fff;
+  color: #111827;
+  padding: 10px 12px;
+}
+
+.v2Sidebar textarea {
+  min-height: 92px;
+  resize: vertical;
+}
+
+.v2Primary {
+  background: #111827 !important;
+  border-color: #111827 !important;
+  color: #fff !important;
+  font-weight: 750;
+}
+
+.v2ControlGroup {
+  margin-top: 8px;
+  padding-top: 14px;
+  border-top: 1px solid #edf0f3;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.v2ControlGroup label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: #475569;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.v2Swatches {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 8px;
+}
+
+.v2Swatches button {
+  aspect-ratio: 1;
+  min-height: 34px;
+  padding: 0;
+}
+
+.v2Swatches button.active {
+  outline: 3px solid #111827;
+  outline-offset: 2px;
+}
+
+.v2Segmented {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.v2Segmented button.active {
+  background: #111827;
+  color: #fff;
+  border-color: #111827;
+}
+
+.v2Workspace {
+  min-width: 0;
+  display: grid;
+  grid-template-rows: 68px minmax(0, 1fr) 36px;
+}
+
+.v2Topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 0 22px;
+  background: #ffffff;
+  border-bottom: 1px solid #dde3ea;
+}
+
+.v2Topbar > div {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.v2Topbar > div:first-child {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+}
+
+.v2Scroller {
+  overflow: auto;
+  padding: 34px;
+  background: #dce3ea;
+}
+
+.v2PageLabels {
+  position: relative;
+  height: 24px;
+  margin-bottom: 8px;
+}
+
+.v2PageLabels span {
+  position: absolute;
+  top: 0;
+  color: #475569;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.v2Board {
+  position: relative;
+  background: #fff;
+  box-shadow: 0 20px 40px rgba(15, 23, 42, 0.16);
+  transform-origin: top left;
+}
+
+.v2Stage {
+  position: absolute;
+  inset: 0 auto auto 0;
+  transform-origin: top left;
+  overflow: hidden;
+}
+
+.v2PageBreak {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: rgba(15, 23, 42, 0.2);
+  z-index: 4;
+}
+
+.v2Object {
+  position: absolute;
+  user-select: none;
+  touch-action: none;
+  transform-origin: center;
+}
+
+.v2Object.selected {
+  outline: 5px solid #111827;
+  outline-offset: 4px;
+}
+
+.v2Object img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.v2Text {
+  width: 100%;
+  height: 100%;
+  white-space: pre-wrap;
+  line-height: 1.1;
+}
+
+.v2Status {
+  padding: 10px 22px;
+  background: #fff;
+  border-top: 1px solid #dde3ea;
+}
+
+@media (max-width: 900px) {
+  .studioV2 {
+    min-height: 100vh;
+    height: auto;
+    grid-template-columns: 1fr;
+  }
+
+  .v2Sidebar {
+    max-height: none;
+    border-right: 0;
+    border-bottom: 1px solid #dde3ea;
+  }
+
+  .v2Workspace {
+    min-height: 720px;
+  }
+
+  .v2Topbar {
+    height: auto;
+    padding: 12px;
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
+
 html,
 body {
   margin: 0;

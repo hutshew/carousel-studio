@@ -2,7 +2,7 @@
 
 import dynamic from 'next/dynamic';
 
-const CarouselEditor = dynamic(() => import('../components/editor/CarouselEditor'), {
+const CarouselEditor = dynamic(() => import('../components/editor/StudioV2'), {
   ssr: false,
 });
 
