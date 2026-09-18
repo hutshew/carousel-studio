@@ -44,6 +44,8 @@ Then open `http://localhost:3000`.
 npm run build
 ```
 
+Cloudflare Pages should run the build command above and publish the static `out` directory.
+
 ## Usage
 
 1. Upload photos from the Upload or Photos panel.
