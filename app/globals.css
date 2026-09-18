@@ -1,4 +1,4 @@
-@import url("https://fonts.googleapis.com/css2?family=Kanit:wght@400;600;700&family=Noto+Sans+Thai:wght@400;600;700&family=Prompt:wght@400;600;700&family=Sarabun:wght@400;600;700&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Cormorant+Garamond:wght@400;700&family=Fraunces:wght@400;700&family=Italiana&family=Josefin+Sans:wght@400;700&family=Kanit:wght@400;600;700&family=Noto+Sans+Thai:wght@400;600;700&family=Playfair+Display:wght@400;700&family=Prompt:wght@400;600;700&family=Sarabun:wght@400;600;700&family=Syne:wght@400;700&display=swap");
 
 * {
   box-sizing: border-box;
@@ -226,6 +226,552 @@
   padding: 10px 22px;
   background: #fff;
   border-top: 1px solid #dde3ea;
+}
+
+.luxStudio {
+  height: 100vh;
+  display: grid;
+  grid-template-columns: 354px minmax(0, 1fr);
+  grid-template-rows: 52px minmax(0, 1fr);
+  background: #0d0d10;
+  color: #efe6d0;
+  overflow: hidden;
+}
+
+.luxHeader {
+  grid-column: 1 / 3;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 18px;
+  background: #0b0b0c;
+  border-bottom: 1px solid #242429;
+}
+
+.luxLogo {
+  color: #d6a83b;
+  font-family: Cormorant Garamond, Georgia, serif;
+  font-size: 20px;
+  letter-spacing: 0.08em;
+}
+
+.luxLogo span {
+  color: #e0ad3c;
+}
+
+.luxHeader button,
+.luxPanel button,
+.luxPanel select,
+.luxPanel textarea,
+.luxPanel input {
+  border: 1px solid #36343a;
+  border-radius: 8px;
+  background: #101013;
+  color: #efe6d0;
+  padding: 9px 12px;
+}
+
+.luxHeader button,
+.luxWide {
+  border-color: #8b6a24 !important;
+  background: rgba(214, 168, 59, 0.12) !important;
+  color: #f1b841 !important;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 12px;
+}
+
+.luxPanel {
+  grid-column: 1;
+  grid-row: 2;
+  min-height: 0;
+  height: calc(100vh - 52px);
+  padding: 28px 18px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: #17171b;
+  border-right: 1px solid #353026;
+}
+
+.luxEyebrow,
+.luxMeta,
+.luxSlideWrap p {
+  color: #a78131;
+  text-transform: uppercase;
+  letter-spacing: 0.24em;
+  font-size: 11px;
+}
+
+.luxCards.two {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.luxCard {
+  margin-bottom: 12px;
+  padding: 16px;
+  border: 1px solid #34343b;
+  border-radius: 10px;
+  background: #202025;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.03);
+}
+
+.luxCardHead {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.luxCard h2 {
+  margin: 0 0 14px;
+  color: #fff8e8;
+  font-size: 15px;
+  line-height: 1.2;
+}
+
+.luxCard h2 small {
+  color: #b79042;
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.luxStep {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  margin-bottom: 10px;
+  border: 1px solid #9f7629;
+  border-radius: 999px;
+  color: #d6a83b;
+  font-size: 13px;
+}
+
+.luxPills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.luxPills button,
+.luxNumberGrid button {
+  border-color: transparent;
+  background: #0d0d10;
+  color: #9ca3af;
+}
+
+.luxPills button.active,
+.luxNumberGrid button.active,
+.luxFontGrid button.active,
+.luxTemplateGrid button.active {
+  border-color: #d6a83b;
+  color: #f3bd43;
+  box-shadow: 0 0 0 1px rgba(214,168,59,0.22), 0 10px 22px rgba(0,0,0,0.28);
+}
+
+.luxNumberGrid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.luxTemplateGrid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.luxTemplateGrid button {
+  min-height: 62px;
+  padding: 7px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  color: #fff;
+  text-shadow: 0 1px 8px rgba(0,0,0,0.7);
+}
+
+.luxTemplateGrid b {
+  font-size: 13px;
+}
+
+.luxTemplateGrid span {
+  font-size: 9px;
+  font-weight: 800;
+}
+
+.luxWide {
+  width: 100%;
+  margin-top: 10px;
+}
+
+.luxWide.subtle {
+  background: #101013 !important;
+  color: #d9d0be !important;
+}
+
+.luxGold {
+  width: 100%;
+  border-color: #d3a64a !important;
+  background: #d3a64a !important;
+  color: #050505 !important;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+}
+
+.luxHelp {
+  margin: 10px 0 0;
+  color: #8d94a1;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.luxLabel {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin-bottom: 10px;
+  color: #858995;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.luxLabel b {
+  color: #d3a64a;
+  font-weight: 700;
+}
+
+.luxSubhead {
+  margin: 12px 0 7px;
+  color: #c08f31;
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+.luxPills.compact {
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.luxPills.compact button {
+  min-width: 38px;
+  padding: 8px 10px;
+}
+
+.luxSlideTabs {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 4px;
+  margin-bottom: 12px;
+  padding: 4px;
+  border-radius: 8px;
+  background: #09090b;
+}
+
+.luxSlideTabs button {
+  border: 0;
+  background: transparent;
+  color: #8490a0;
+  padding: 8px;
+}
+
+.luxSlideTabs button.active {
+  background: #24242a;
+  color: #d3a64a;
+}
+
+.luxColorRows {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.luxColorRows label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: #858995;
+  font-size: 12px;
+}
+
+.luxColorRows input {
+  width: 42px !important;
+  height: 30px;
+  padding: 3px !important;
+}
+
+.luxMoveGrid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.luxMoveGrid button {
+  min-height: 30px;
+}
+
+.luxCoverActions,
+.luxExportGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin: 8px 0;
+}
+
+.luxExportGrid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.luxHighlightPreview {
+  width: 96px;
+  height: 96px;
+  margin: 12px auto 0;
+  display: grid;
+  place-items: center;
+  border: 2px solid #8b6a24;
+  border-radius: 999px;
+  background: radial-gradient(circle at 50% 38%, #302707, #111 70%);
+  color: #d3a64a;
+  text-align: center;
+  box-shadow: 0 10px 24px rgba(0,0,0,0.35);
+}
+
+.luxHighlightPreview span {
+  font-size: 26px;
+}
+
+.luxHighlightPreview small {
+  display: block;
+  max-width: 70px;
+  overflow: hidden;
+  color: #847b68;
+  font-size: 7px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.luxFontGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.luxFontGrid button {
+  min-height: 38px;
+  background: #0f0f12;
+}
+
+.luxCard textarea {
+  width: 100%;
+  min-height: 86px;
+  resize: vertical;
+  margin-bottom: 8px;
+}
+
+.luxCard select,
+.luxCard input[type="range"],
+.luxCard input[type="color"] {
+  width: 100%;
+  margin-bottom: 8px;
+}
+
+.luxWorkspace {
+  grid-column: 2;
+  grid-row: 2;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  background: #101012;
+}
+
+.luxTabs {
+  height: 66px;
+  padding: 20px 24px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border-bottom: 1px solid #242429;
+  background: #17171b;
+}
+
+.luxTabs span {
+  padding: 7px 12px;
+  border: 1px solid #8b6a24;
+  border-radius: 999px;
+  color: #f1b841;
+  background: rgba(214,168,59,0.12);
+}
+
+.luxTabs b {
+  color: #8d94a1;
+  font-size: 13px;
+}
+
+.luxMeta {
+  padding: 18px 24px 0;
+  display: flex;
+  gap: 16px;
+  align-items: center;
+}
+
+.luxMeta b {
+  color: #a78131;
+  font-weight: 500;
+}
+
+.luxSlides {
+  padding: 16px 24px 70px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(290px, 1fr));
+  gap: 16px;
+  align-items: start;
+}
+
+.luxSlideWrap p {
+  text-align: center;
+  color: #768095;
+  margin: 0 0 8px;
+}
+
+.luxSlide {
+  container-type: inline-size;
+  position: relative;
+  overflow: hidden;
+  background: #222;
+  box-shadow: 0 22px 50px rgba(0,0,0,0.42);
+}
+
+.luxShade {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at 16% 72%, rgba(214,168,59,0.34), transparent 9%),
+    linear-gradient(90deg, rgba(0,0,0,0.48), rgba(0,0,0,0.18) 55%, rgba(0,0,0,0.42));
+  pointer-events: none;
+}
+
+.luxTiny {
+  position: absolute;
+  top: 7%;
+  left: 7%;
+  color: rgba(255,255,255,0.45);
+  font-size: 8px;
+  letter-spacing: 0.18em;
+  z-index: 2;
+}
+
+.luxObject {
+  position: absolute;
+  z-index: 3;
+  touch-action: none;
+  user-select: none;
+}
+
+.luxObject.selected {
+  outline: 1px solid #d6a83b;
+  outline-offset: 4px;
+}
+
+.luxObject img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  filter: saturate(0.78) contrast(0.9);
+}
+
+.luxText {
+  width: 100%;
+  height: 100%;
+  white-space: pre-wrap;
+  line-height: 0.9;
+}
+
+.luxGeneratedCopy {
+  position: absolute;
+  z-index: 5;
+  pointer-events: none;
+  white-space: pre-wrap;
+}
+
+.luxGeneratedCopy small {
+  display: block;
+  margin-bottom: 5cqw;
+  opacity: 0.56;
+  font-family: Inter, Arial, sans-serif;
+  font-size: 1.35cqw;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.luxGeneratedCopy h3 {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.luxGeneratedCopy p {
+  margin: 4cqw 0 0;
+  font-family: Inter, Arial, sans-serif;
+  font-weight: 700;
+  white-space: pre-wrap;
+}
+
+.luxSlideActions {
+  display: flex;
+  justify-content: center;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.luxSlideActions button {
+  border: 1px solid #665029;
+  border-radius: 8px;
+  background: #161616;
+  color: #d6a83b;
+  padding: 8px 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 11px;
+}
+
+.luxStatus {
+  position: fixed;
+  right: 20px;
+  bottom: 14px;
+  color: #8d94a1;
+  font-size: 12px;
+}
+
+@media (max-width: 1000px) {
+  .luxStudio {
+    grid-template-columns: 1fr;
+    grid-template-rows: 52px auto auto;
+  }
+
+  .luxHeader,
+  .luxPanel,
+  .luxWorkspace {
+    grid-column: 1;
+  }
+
+  .luxPanel {
+    height: auto;
+    max-height: none;
+    grid-row: 2;
+    border-right: 0;
+    border-bottom: 1px solid #353026;
+  }
+
+  .luxWorkspace {
+    grid-row: 3;
+  }
 }
 
 @media (max-width: 900px) {
